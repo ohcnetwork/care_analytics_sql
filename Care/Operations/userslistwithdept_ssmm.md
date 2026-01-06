@@ -34,9 +34,9 @@ LEFT JOIN emr_facilityorganization fo
 LEFT JOIN security_rolemodel rm
     ON rm.id = fou.role_id
 WHERE u.deleted = FALSE
-    [[AND (CONCAT(u.first_name, ' ', u.last_name)) = ({{full_name}}) ]]
-    [[AND (fo.name) = ({{department}}) ]]
-    [[AND (rm.name) = ({{role}}) ]]
+    -- [[AND (CONCAT(u.first_name, ' ', u.last_name)) = ({{full_name}}) ]]
+    -- [[AND (fo.name) = ({{department}}) ]]
+    -- [[AND (rm.name) = ({{role}}) ]]
 GROUP BY 
     u.id, full_name, u.phone_number, u.email, u.user_type
 ORDER BY full_name;
