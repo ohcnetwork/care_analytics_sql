@@ -63,7 +63,6 @@ patient_tags AS (
     LEFT JOIN emr_tagconfig et
         ON et.id = tag_id
         AND et.deleted = FALSE
-        AND et.parent_id IN (55, 47, 18, 22, 26)
     GROUP BY bd.patient_id
 )
 
