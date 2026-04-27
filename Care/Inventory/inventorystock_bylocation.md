@@ -28,7 +28,7 @@ JOIN emr_product p ON ii.product_id = p.id
 JOIN emr_productknowledge pk ON p.product_knowledge_id = pk.id
 JOIN emr_facilitylocation fl ON ii.location_id = fl.id
 WHERE ii.deleted = FALSE
-  --[[AND LOWER(pk.name) ILIKE LOWER({{stock_name}}) || '%']]
+  --[[AND pk.name =  {{stock_name}} ]]
   --[[AND fl.name IN ({{location}})]]
 GROUP BY fl.name, pk.name
 ORDER BY fl.name, pk.name;
