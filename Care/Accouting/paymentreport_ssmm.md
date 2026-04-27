@@ -45,7 +45,7 @@ JOIN emr_patient ON emr_account.patient_id = emr_patient.id
 LEFT JOIN emr_patientidentifier pi
     ON emr_patient.id = pi.patient_id
    AND pi.config_id = 21
-WHERE 1=1
+WHERE emr_paymentreconciliation.deleted = FALSE
   --[[AND {{date}}]]
   --[[AND {{status}}]]
   --[[AND {{method}}]]
