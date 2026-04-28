@@ -38,7 +38,7 @@ JOIN emr_facilitylocation fl
    AND fl.root_location_id = 300
 WHERE e.encounter_class = 'imp'
   AND e.deleted = FALSE
-  AND fle.end_datetime IS NULL
+  AND fle.status = 'active'
   --[[AND {{created_date}}]]
 ORDER BY e.id, fle.created_date DESC;
 ```
