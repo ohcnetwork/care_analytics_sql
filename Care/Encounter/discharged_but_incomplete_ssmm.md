@@ -26,8 +26,9 @@ WITH first_discharged AS (
       AND e.deleted = FALSE
       AND discharged_status->>'status' = 'discharged'
       AND e.status != 'completed'
-    ORDER BY e.id, (discharged_status->>'moved_at')::timestamp
+    ORDER BY e.id, (discharged_status->>'moved_at')::timestamp DESC
 ),
+
 latest_bed AS (
     SELECT DISTINCT ON (fle.encounter_id)
         fle.encounter_id,
@@ -39,7 +40,8 @@ latest_bed AS (
       AND fl.root_location_id != 300
     ORDER BY fle.encounter_id, fle.created_date DESC
 )
-SELECT DISTINCT ON (p.id)
+
+SELECT
     p.name AS patient_name,
     pi.value AS ssmm_id,
     fd.discharged_datetime,
@@ -49,12 +51,9 @@ SELECT DISTINCT ON (p.id)
 FROM first_discharged fd
 JOIN emr_encounter e ON fd.encounter_id = e.id
 JOIN emr_patient p ON e.patient_id = p.id
-LEFT JOIN emr_patientidentifier pi
-    ON p.id = pi.patient_id
-   AND pi.config_id = 21
-LEFT JOIN latest_bed lb ON e.id = lb.encounter_id
+LEFT JOIN emr_patientidentifier pi ON p.id = pi.patient_id AND pi.config_id = 21
+JOIN latest_bed lb ON e.id = lb.encounter_id
 WHERE fd.discharged_datetime < CURRENT_TIMESTAMP - INTERVAL '1 day'
-  AND lb.bed_name IS NOT NULL
 ORDER BY p.id, fd.discharged_datetime DESC, p.name;
 ```
 
