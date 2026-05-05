@@ -11,7 +11,7 @@ Returns the total number of active in-patient (`encounter_class = 'imp'`) encoun
 
 | Parameter | Type | Description | Example |
 |-----------|------|-------------|---------|
-| `created_date` | DATE | Filter by encounter creation date range | `emr_encounter.created_date BETWEEN '2026-04-01' AND '2026-04-30'` |
+| `date` | DATE | Filter by encounter creation date range | `emr_encounter.created_date BETWEEN '2026-04-01' AND '2026-04-30'` |
 
 ---
 
@@ -30,7 +30,7 @@ WHERE e.encounter_class = 'imp'
   AND fl.form = 'bd'
   AND fle.deleted = FALSE
   AND fl.root_location_id != 300
-  --[[AND {{start_date}}]]
+  --[[AND {{date}}]]
 ```
 
 
