@@ -29,26 +29,19 @@ SELECT DISTINCT ON (e.id)
     TRIM(u2.first_name || ' ' || COALESCE(u2.last_name, '')) AS bed_assigned_by
 FROM emr_encounter e
 JOIN emr_patient p ON e.patient_id = p.id
-LEFT JOIN emr_patientidentifier pi
-    ON p.id = pi.patient_id
-   AND pi.config_id = 21
+LEFT JOIN emr_patientidentifier pi ON p.id = pi.patient_id AND pi.config_id = 21
 JOIN users_user u ON e.created_by_id = u.id
-LEFT JOIN emr_facilitylocationencounter fle ON fle.encounter_id = e.id
-LEFT JOIN emr_facilitylocation fl
-    ON fle.location_id = fl.id
-   AND fl.form = 'bd'
-   AND fl.root_location_id != 300
+JOIN emr_facilitylocationencounter fle ON fle.encounter_id = e.id
+JOIN emr_facilitylocation fl ON fle.location_id = fl.id
 LEFT JOIN users_user u2 ON fle.created_by_id = u2.id
 WHERE e.encounter_class = 'imp'
   AND e.deleted = FALSE
-  AND NOT EXISTS (
-      SELECT 1 
-      FROM emr_facilitylocationencounter fle2
-      JOIN emr_facilitylocation fl2 ON fle2.location_id = fl2.id
-      WHERE fle2.encounter_id = e.id
-        AND fl2.root_location_id = 300
-  )
-  --[[AND {{created_date}}]]
+  AND fl.deleted = FALSE
+  AND fl.status = 'active'
+  AND fl.form = 'bd'
+  AND fle.deleted = FALSE
+  AND fl.root_location_id != 300
+  --[[AND {{start_date}}]]
 ORDER BY e.id, fle.created_date DESC;
 ```
 

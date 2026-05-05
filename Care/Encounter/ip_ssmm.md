@@ -19,18 +19,18 @@ Returns the total number of active in-patient (`encounter_class = 'imp'`) encoun
 
 ```sql
 SELECT 
-    COUNT(*) AS encounter_count
-FROM emr_encounter
-WHERE emr_encounter.encounter_class = 'imp'
-  AND emr_encounter.deleted = FALSE
-  AND NOT EXISTS (
-      SELECT 1
-      FROM emr_facilitylocationencounter fle
-      JOIN emr_facilitylocation fl ON fle.location_id = fl.id
-      WHERE fle.encounter_id = emr_encounter.id
-        AND fl.root_location_id = 300
-  )
-  --[[AND {{created_date}}]];
+    COUNT(DISTINCT e.id) AS encounter_count
+FROM emr_encounter e
+JOIN emr_facilitylocationencounter fle ON fle.encounter_id = e.id
+JOIN emr_facilitylocation fl ON fle.location_id = fl.id
+WHERE e.encounter_class = 'imp'
+  AND e.deleted = FALSE
+  AND fl.deleted = FALSE
+  AND fl.status = 'active'
+  AND fl.form = 'bd'
+  AND fle.deleted = FALSE
+  AND fl.root_location_id != 300
+  --[[AND {{start_date}}]]
 ```
 
 
