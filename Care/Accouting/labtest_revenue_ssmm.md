@@ -19,7 +19,7 @@ Returns the total lab test revenue at SSMM by summing `total_price` of charge it
 
 ```sql
 SELECT 
-    COALESCE(SUM(ci.total_price), 0) AS total_revenue_today
+    COALESCE(SUM(ci.total_price), 0) AS total_revenue
 FROM emr_chargeitem ci
 JOIN emr_chargeitemdefinition cid ON ci.charge_item_definition_id = cid.id
 JOIN emr_resourcecategory rc ON cid.category_id = rc.id
