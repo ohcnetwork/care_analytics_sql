@@ -27,12 +27,11 @@ SELECT
     SUM(ci.total_price - (p.purchase_price * md.quantity)) AS total_margin  
 FROM emr_medicationdispense md
 JOIN emr_chargeitem ci ON md.charge_item_id = ci.id         
-JOIN emr_inventoryitem ii ON md.item_id = ii.id
-JOIN emr_product p ON ii.product_id = p.id
+JOIN emr_chargeitemdefinition cid ON ci.charge_item_definition_id = cid.id 
+JOIN emr_product p ON p.charge_item_definition_id = cid.id
 JOIN emr_productknowledge pk ON p.product_knowledge_id = pk.id
 WHERE md.status IN ('completed', 'in_progress', 'preparation')  
   AND md.deleted = FALSE                                         
-  AND ci.deleted = FALSE
   AND ci.status IN ('billed', 'paid')
   --[[AND pk.name = {{stock_name}}]]
   --[[AND {{DATE}}]]  
@@ -43,7 +42,7 @@ ORDER BY total_quantity_dispensed DESC;
 
 ## Notes
 
-- Only non-deleted medication dispenses and charge items are included.
+- Only non-deleted medication dispenses are included.
 - Dispense status is filtered to `completed`, `in_progress`, and `preparation` to capture both fulfilled and active dispenses.
 - Charge item status is filtered to `billed` and `paid` to ensure only items that have generated revenue are counted.
 - Metabase-specific filters (`[[...]]`) allow dynamic filtering in dashboards.
