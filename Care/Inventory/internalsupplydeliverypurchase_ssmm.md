@@ -21,18 +21,16 @@ Tracks stock supplied by a particular internal supplier organisation (`supplier_
 ```sql
 SELECT
     DATE(sd.created_date) AS created_date,
-    pk.name AS stock,
-    org.name AS supplier_name,
+	pk.name AS stock,
     fl.name AS destination_location,
     SUM(sd.supplied_item_quantity) AS total_quantity,
     SUM(p.purchase_price * sd.supplied_item_quantity) AS total_purchase_price
 FROM emr_supplydelivery sd
 JOIN emr_deliveryorder delivery_order ON sd.order_id = delivery_order.id
 JOIN emr_facilitylocation fl ON delivery_order.destination_id = fl.id
-JOIN emr_organization org ON delivery_order.supplier_id = org.id
-JOIN emr_inventoryitem ii ON sd.supplied_inventory_item_id = ii.id
-JOIN emr_product p ON ii.product_id = p.id
-JOIN emr_productknowledge pk ON p.product_knowledge_id = pk.id
+ JOIN emr_inventoryitem ii ON sd.supplied_inventory_item_id = ii.id
+ JOIN emr_product p ON ii.product_id = p.id
+ JOIN emr_productknowledge pk ON p.product_knowledge_id = pk.id
 WHERE delivery_order.supplier_id = 20697
   AND sd.deleted = FALSE
   AND delivery_order.deleted = FALSE
@@ -40,9 +38,9 @@ WHERE delivery_order.supplier_id = 20697
   AND sd.status IN ('completed', 'in_progress')
   AND delivery_order.status IN ('completed', 'pending')
   AND fl.status = 'active'
-  --[[AND {{created_date}}]]
-  --[[AND fl.name IN ({{location}})]]
-GROUP BY DATE(sd.created_date), org.name, fl.name, pk.name
+  [[AND {{created_date}}]]
+  [[AND fl.name IN ({{location}})]]
+GROUP BY DATE(sd.created_date), fl.name, pk.name
 ORDER BY DATE(sd.created_date) DESC, total_purchase_price DESC;
 ```
 
