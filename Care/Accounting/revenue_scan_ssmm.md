@@ -22,10 +22,8 @@ SELECT
     COALESCE(SUM(ci.total_price), 0) AS total_revenue
 FROM emr_chargeitem ci
 JOIN emr_chargeitemdefinition cid ON ci.charge_item_definition_id = cid.id
-JOIN emr_resourcecategory rc ON cid.category_id = rc.id
 JOIN emr_invoice inv ON ci.paid_invoice_id = inv.id
-WHERE rc.id IN (32, 57)
-  AND ci.deleted = FALSE
+WHERE cid.category_id IN (32,57)
   AND ci.status IN ('paid', 'billed')
   AND inv.deleted = FALSE
   AND inv.status IN ('issued', 'balanced')
@@ -36,7 +34,7 @@ WHERE rc.id IN (32, 57)
 
 ## Notes
 
-- Hardcoded to `rc.id IN (32, 57)` — the scan / imaging resource categories. Update if these IDs change or new scan categories are added.
+- Hardcoded to `cid.category_id  IN (32, 57)` — the scan / imaging resource categories. Update if these IDs change or new scan categories are added.
 - `COALESCE(SUM(...), 0)` ensures the result is `0` instead of `NULL` when no rows match.
 - Metabase-specific filters (`[[...]]`) allow dynamic filtering in dashboards; remove the brackets when running outside Metabase.
 

@@ -22,10 +22,8 @@ SELECT
     COUNT(ci.id) AS total_tests
 FROM emr_chargeitem ci
 JOIN emr_chargeitemdefinition cid ON ci.charge_item_definition_id = cid.id
-JOIN emr_resourcecategory rc ON cid.category_id = rc.id
-WHERE rc.id IN (32, 57)
+WHERE cid.category_id IN (32,57)
   AND ci.status IN ('paid', 'billed', 'billable')
-  AND ci.deleted = FALSE
   --[[AND {{DATE}}]]
 ;
 ```
@@ -34,8 +32,7 @@ WHERE rc.id IN (32, 57)
 
 ## Notes
 
-- Hardcoded to `rc.id IN (32, 57)` — the scan / imaging resource categories. Update if these category IDs change or new scan categories are added.
-- Only active (`ci.deleted = FALSE`) charge items are included.
+- Hardcoded to `cid.category_id  IN (32, 57)` — the scan / imaging resource categories. Update if these category IDs change or new scan categories are added.
 - Metabase-specific filters (`[[...]]`) allow dynamic filtering in dashboards.
 
 *Last updated: 2026-05-04*
