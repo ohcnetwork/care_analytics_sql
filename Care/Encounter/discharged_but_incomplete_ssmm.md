@@ -18,8 +18,9 @@ Identifies in-patient (`encounter_class = 'imp'`) encounters at SSMM whose statu
 WITH first_discharged AS (
     SELECT DISTINCT ON (e.id)
         e.id AS encounter_id,
+        e.patient_id,  
         e.status AS current_status,
-        (discharged_status->>'moved_at')::timestamp + INTERVAL '5 hours 30 minutes' AS discharged_datetime
+        (discharged_status->>'moved_at')::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' AS discharged_datetime
     FROM emr_encounter e
     CROSS JOIN LATERAL jsonb_array_elements(e.status_history->'history') AS discharged_status
     WHERE e.encounter_class = 'imp'
@@ -27,21 +28,9 @@ WITH first_discharged AS (
       AND discharged_status->>'status' = 'discharged'
       AND e.status != 'completed'
     ORDER BY e.id, (discharged_status->>'moved_at')::timestamp DESC
-),
-
-latest_bed AS (
-    SELECT DISTINCT ON (fle.encounter_id)
-        fle.encounter_id,
-        fl.name AS bed_name,
-        fle.created_date AS bed_assigned_date
-    FROM emr_facilitylocationencounter fle
-    JOIN emr_facilitylocation fl ON fle.location_id = fl.id
-    WHERE fl.form = 'bd'
-      AND fl.root_location_id != 300
-    ORDER BY fle.encounter_id, fle.created_date DESC
 )
 
-SELECT
+SELECT 
     p.name AS patient_name,
     pi.value AS ssmm_id,
     fd.discharged_datetime,
@@ -49,12 +38,22 @@ SELECT
     lb.bed_name AS latest_bed,
     lb.bed_assigned_date
 FROM first_discharged fd
-JOIN emr_encounter e ON fd.encounter_id = e.id
-JOIN emr_patient p ON e.patient_id = p.id
+JOIN emr_patient p ON fd.patient_id = p.id
 LEFT JOIN emr_patientidentifier pi ON p.id = pi.patient_id AND pi.config_id = 21
-JOIN latest_bed lb ON e.id = lb.encounter_id
+JOIN LATERAL (
+    SELECT 
+        fl.name AS bed_name,
+        fle.created_date AS bed_assigned_date
+    FROM emr_facilitylocationencounter fle
+    JOIN emr_facilitylocation fl ON fle.location_id = fl.id
+    WHERE fle.encounter_id = fd.encounter_id
+      AND fl.form = 'bd'
+      AND fl.root_location_id != 300
+    ORDER BY fle.created_date DESC
+    LIMIT 1
+) lb ON TRUE
 WHERE fd.discharged_datetime < CURRENT_TIMESTAMP - INTERVAL '1 day'
-ORDER BY p.id, fd.discharged_datetime DESC, p.name;
+ORDER BY p.id, fd.discharged_datetime DESC, p.name
 ```
 
 
