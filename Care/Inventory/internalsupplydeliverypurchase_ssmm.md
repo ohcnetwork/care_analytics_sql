@@ -38,8 +38,8 @@ WHERE delivery_order.supplier_id = 20697
   AND sd.status IN ('completed', 'in_progress')
   AND delivery_order.status IN ('completed', 'pending')
   AND fl.status = 'active'
-  [[AND {{created_date}}]]
-  [[AND fl.name IN ({{location}})]]
+  --[[AND {{created_date}}]]
+  --[[AND fl.name IN ({{location}})]]
 GROUP BY DATE(sd.created_date), fl.name, pk.name
 ORDER BY DATE(sd.created_date) DESC, total_purchase_price DESC;
 ```
