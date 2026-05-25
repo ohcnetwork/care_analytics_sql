@@ -32,8 +32,6 @@ JOIN emr_facilitylocation fl ON delivery_order.destination_id = fl.id
  JOIN emr_product p ON ii.product_id = p.id
  JOIN emr_productknowledge pk ON p.product_knowledge_id = pk.id
 WHERE delivery_order.supplier_id = 20697
-  AND sd.deleted = FALSE
-  AND delivery_order.deleted = FALSE
   AND fl.deleted = FALSE
   AND sd.status IN ('completed', 'in_progress')
   AND delivery_order.status IN ('completed', 'pending')
