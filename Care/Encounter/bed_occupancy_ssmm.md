@@ -19,38 +19,26 @@ Provides a real-time bed occupancy summary at SSMM, broken down by **floor** . F
 
 ```sql
 WITH all_beds AS (
-    
     SELECT
         parent_loc.name AS level1_name,
         COALESCE(grandparent_loc.name, parent_loc.name) AS floor,
         fl.id AS bed_id
     FROM emr_facilitylocation fl
-    LEFT JOIN emr_facilitylocation parent_loc ON fl.parent_id = parent_loc.id  
+    LEFT JOIN emr_facilitylocation parent_loc ON fl.parent_id = parent_loc.id
     LEFT JOIN emr_facilitylocation grandparent_loc ON parent_loc.parent_id = grandparent_loc.id
     WHERE fl.deleted = FALSE
       AND fl.status = 'active'
       AND fl.form = 'bd'
       AND fl.root_location_id != 300
-	  AND fl.parent_id NOT IN (19,44)
-	  
+      AND fl.parent_id NOT IN (19, 44)
 ),
 occupied_beds AS (
-    
     SELECT DISTINCT ON (e.patient_id)
-        parent_loc.name AS level1_name,
-        COALESCE(grandparent_loc.name, parent_loc.name) AS floor,
-        fl.id AS bed_id
+        ab.bed_id
     FROM emr_facilitylocationencounter fle
-    INNER JOIN emr_facilitylocation fl ON fle.location_id = fl.id
-    LEFT JOIN emr_facilitylocation parent_loc ON fl.parent_id = parent_loc.id  
-    LEFT JOIN emr_facilitylocation grandparent_loc ON parent_loc.parent_id = grandparent_loc.id
-    INNER JOIN emr_encounter e ON fle.encounter_id = e.id
-    WHERE fl.deleted = FALSE
-      AND fl.status = 'active'
-      AND fl.form = 'bd'
-      AND fl.root_location_id != 300
-	  AND fl.parent_id NOT IN (19,44)
-      AND fle.deleted = FALSE
+    JOIN emr_encounter e ON fle.encounter_id = e.id
+    JOIN all_beds ab ON ab.bed_id = fle.location_id
+    WHERE fle.deleted = FALSE
       --AND DATE(fle.start_datetime) <= {{report_date}}
       --AND (fle.end_datetime IS NULL OR DATE(fle.end_datetime) > {{report_date}})
     ORDER BY e.patient_id, fle.start_datetime DESC
@@ -62,25 +50,19 @@ bed_stats AS (
         COUNT(DISTINCT ab.bed_id) AS total_bed_count,
         COUNT(DISTINCT ob.bed_id) AS occupied_bed_count
     FROM all_beds ab
-    LEFT JOIN occupied_beds ob 
-        ON ab.bed_id = ob.bed_id 
-        AND ab.level1_name = ob.level1_name 
-        AND ab.floor = ob.floor
+    LEFT JOIN occupied_beds ob ON ab.bed_id = ob.bed_id
     GROUP BY ab.level1_name, ab.floor
 )
-
 SELECT * FROM (
     SELECT * FROM bed_stats
-    
     UNION ALL
-    
     SELECT
         'Total' AS level1_name,
         'Total' AS floor,
-        SUM(total_bed_count) AS total_bed_count,
-        SUM(occupied_bed_count) AS occupied_bed_count
+        SUM(total_bed_count),
+        SUM(occupied_bed_count)
     FROM bed_stats
-) AS final_result
+) final_result
 ORDER BY CASE WHEN floor = 'Total' THEN 1 ELSE 0 END, floor, level1_name;
 ```
 
