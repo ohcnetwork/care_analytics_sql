@@ -18,31 +18,25 @@ Identifies in-patient (`encounter_class = 'imp'`) encounters at SSMM whose statu
 SELECT 
     p.name AS patient_name,
     pi.value AS ssmm_id,
-    fd.discharged_datetime,
-    fd.current_status
-FROM (
-    SELECT DISTINCT ON (e.id)
-        e.id AS encounter_id,
-        e.patient_id,
-        e.status AS current_status,
-        (e.period->>'end')::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' AS discharged_datetime
-    FROM emr_encounter e
-    CROSS JOIN LATERAL jsonb_array_elements(e.status_history->'history') h
-    WHERE e.encounter_class = 'imp'
-      AND e.deleted = FALSE
-      AND e.status != 'completed'
-      AND h->>'status' = 'discharged'
-) fd
-JOIN emr_patient p ON p.id = fd.patient_id
+    (e.period->>'end')::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata' AS discharged_datetime,
+    e.status AS current_status
+FROM emr_encounter e
+JOIN emr_patient p ON p.id = e.patient_id
 LEFT JOIN emr_patientidentifier pi 
     ON pi.patient_id = p.id
    AND pi.config_id = 21
-WHERE fd.discharged_datetime < CURRENT_TIMESTAMP - INTERVAL '1 day'
+WHERE e.encounter_class = 'imp'
+  AND e.deleted = FALSE
+  AND e.status != 'completed'
+  AND e.period->>'end' IS NOT NULL
+  AND e.status_history->'history' @> '[{"status": "discharged"}]'::jsonb
+  AND (e.period->>'end')::timestamp AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Kolkata'
+      < CURRENT_TIMESTAMP - INTERVAL '1 day'
   AND EXISTS (
       SELECT 1
       FROM emr_facilitylocationencounter fle
       JOIN emr_facilitylocation fl ON fl.id = fle.location_id
-      WHERE fle.encounter_id = fd.encounter_id
+      WHERE fle.encounter_id = e.id
         AND fl.form = 'bd'
         AND fl.root_location_id != 300
   )
