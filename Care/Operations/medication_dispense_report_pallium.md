@@ -1,11 +1,11 @@
 
 # Medication Dispense Report - Pallium
 
-> Line-level medication dispense report with location, batch, expiry, dispensing staff, charge details.
+> Line-level medication dispense report with location, batch, expiry, ans dispensing staff
 
 ## Purpose
 
-Detailed view of completed medication dispenses at Pallium. Each row is one dispense and includes the inventory location, product / batch / expiry, who dispensed it, the linked charge item (status, quantity, total price).
+Detailed view of completed medication dispenses at Pallium. Each row is one dispense and includes the inventory location, product / batch / expiry, who dispensed it.
 
 ## Parameters
 
@@ -27,17 +27,13 @@ SELECT
     p.expiration_date AS expiry,
     md.created_date,
     TRIM(u.first_name || ' ' || COALESCE(u.last_name, '')) AS created_by_name,
-    md.quantity AS dispensed_quantity,
-    ci.status AS charge_status,
-    ci.quantity AS charge_quantity,
-    ci.total_price AS charge_total_price
+    md.quantity AS dispensed_quantity
 FROM emr_medicationdispense md
 JOIN emr_inventoryitem ii ON md.item_id = ii.id
 JOIN emr_product p ON ii.product_id = p.id
 JOIN emr_productknowledge pk ON p.product_knowledge_id = pk.id
 JOIN emr_facilitylocation fl ON ii.location_id = fl.id
 JOIN users_user u ON md.created_by_id = u.id
-JOIN emr_chargeitem ci ON md.charge_item_id = ci.id
 WHERE md.status = 'completed'
   --[[AND {{date}}]]
   --[[AND fl.name = {{location_filter}}]]
@@ -55,5 +51,5 @@ ORDER BY md.created_date DESC;
 
 *Last updated: 2026-05-25*
 
-````
+
 
