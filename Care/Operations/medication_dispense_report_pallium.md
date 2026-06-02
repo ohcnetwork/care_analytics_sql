@@ -26,7 +26,7 @@ SELECT
     p.batch->>'lot_number' AS batch,
     p.expiration_date AS expiry,
     md.created_date,
-    TRIM(u.first_name || ' ' || COALESCE(u.last_name, '')) AS created_by_name,
+    TRIM(u.first_name || ' ' || u.last_name) AS created_by_name,
     md.quantity AS dispensed_quantity
 FROM emr_medicationdispense md
 JOIN emr_inventoryitem ii ON md.item_id = ii.id
