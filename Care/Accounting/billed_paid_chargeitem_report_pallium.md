@@ -21,12 +21,12 @@
 ```sql
 SELECT
     p.name AS patient_name,
-    pi.value AS ssmm_id,
+    pi.value AS mrn,
     ci.modified_date,
     ci.status,
     ci.title,
     ci.quantity,
-    TRIM(modified_user.first_name || ' ' || COALESCE(modified_user.last_name, '')) AS modified_by,
+    TRIM(modified_user.first_name || ' ' ||modified_user.last_name) AS modified_by,
     ci.total_price
 FROM emr_chargeitem ci
 JOIN emr_patient p ON ci.patient_id = p.id
@@ -50,5 +50,5 @@ ORDER BY ci.modified_date DESC;
 
 *Last updated: 2026-05-28*
 
-````
+
 
