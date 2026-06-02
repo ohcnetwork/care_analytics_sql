@@ -20,43 +20,69 @@ Daily operational report showing each doctor's OP load for the previous day, spl
 ## Query
 
 ```sql
-WITH visits_ordered AS (
+WITH all_visits AS (
     SELECT
-        tb.id AS booking_id,
         ci.patient_id,
-        TRIM(COALESCE(u.prefix || ' ', '') || u.first_name || ' ' || COALESCE(u.last_name, '')) AS doctor_name,
-        ts.start_datetime,
-        ROW_NUMBER() OVER (PARTITION BY ci.patient_id, ci.performer_actor_id ORDER BY ts.start_datetime) AS visit_num
+        ci.performer_actor_id,
+        TRIM(COALESCE(u.prefix || ' ', '') || u.first_name || ' ' || u.last_name) AS doctor_name,
+        ts.start_datetime
     FROM emr_tokenbooking tb
-    JOIN emr_tokenslot ts ON tb.token_slot_id = ts.id
-    JOIN emr_chargeitem ci ON tb.charge_item_id = ci.id
-    JOIN emr_chargeitemdefinition cd ON ci.charge_item_definition_id = cd.id
-    JOIN users_user u ON ci.performer_actor_id = u.id
-    WHERE ci.status IN ('paid', 'billed')
+    JOIN emr_tokenslot ts
+      ON tb.token_slot_id = ts.id
+    JOIN emr_chargeitem ci
+      ON tb.charge_item_id = ci.id
+    JOIN users_user u
+      ON ci.performer_actor_id = u.id
+    WHERE ci.deleted = FALSE
+      AND ci.status IN ('paid', 'billed')
       AND ci.performer_actor_id != 336
       AND ci.service_resource = 'appointment'
-      AND ci.performer_actor_id IS NOT NULL
       AND tb.status IN ('checked_in', 'in_consultation', 'fulfilled')
+),
+
+first_visits AS (
+    SELECT
+        patient_id,
+        performer_actor_id,
+        MIN(start_datetime) AS first_visit_datetime
+    FROM all_visits
+    GROUP BY patient_id, performer_actor_id
+),
+
+yesterday_visits AS (
+    SELECT
+        av.patient_id,
+        av.performer_actor_id,
+        av.doctor_name,
+        av.start_datetime
+    FROM all_visits av
+    WHERE av.start_datetime >= CURRENT_DATE - INTERVAL '1 day'
+      AND av.start_datetime < CURRENT_DATE
 )
 
-SELECT * FROM (
+SELECT *
+FROM (
     SELECT
-        doctor_name,
-        COUNT(*) FILTER (WHERE visit_num = 1) AS new,
-        COUNT(*) FILTER (WHERE visit_num > 1) AS revisit
-    FROM visits_ordered
-    WHERE start_datetime::date = CURRENT_DATE - INTERVAL '1 day'
-    GROUP BY doctor_name
-    
+        yv.doctor_name,
+        COUNT(*) FILTER (WHERE yv.start_datetime = fv.first_visit_datetime) AS new,
+        COUNT(*) FILTER (WHERE yv.start_datetime > fv.first_visit_datetime) AS revisit
+    FROM yesterday_visits yv
+    JOIN first_visits fv
+      ON fv.patient_id = yv.patient_id
+     AND fv.performer_actor_id = yv.performer_actor_id
+    GROUP BY yv.doctor_name
+
     UNION ALL
-    
+
     SELECT
-        'Total',
-        COUNT(*) FILTER (WHERE visit_num = 1),
-        COUNT(*) FILTER (WHERE visit_num > 1)
-    FROM visits_ordered
-    WHERE start_datetime::date = CURRENT_DATE - INTERVAL '1 day'
-) AS final_result
+        'Total' AS doctor_name,
+        COUNT(*) FILTER (WHERE yv.start_datetime = fv.first_visit_datetime) AS new,
+        COUNT(*) FILTER (WHERE yv.start_datetime > fv.first_visit_datetime) AS revisit
+    FROM yesterday_visits yv
+    JOIN first_visits fv
+      ON fv.patient_id = yv.patient_id
+     AND fv.performer_actor_id = yv.performer_actor_id
+) final_result
 ORDER BY CASE WHEN doctor_name = 'Total' THEN 1 ELSE 0 END, doctor_name;
 ```
 
