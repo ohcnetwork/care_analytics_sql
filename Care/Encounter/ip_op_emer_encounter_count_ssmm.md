@@ -1,7 +1,7 @@
 
 # IP / OP / Emergency Encounter Count - SSMM
 
-> Daily counts of occupied inpatient beds, ambulatory (OP) encounters and emergency encounters for the current month-to-date (up to yesterday)
+> Daily counts of occupied inpatient beds, ambulatory (OP) and emergency patients for the current month-to-date (up to yesterday)
 
 ## Purpose
 
