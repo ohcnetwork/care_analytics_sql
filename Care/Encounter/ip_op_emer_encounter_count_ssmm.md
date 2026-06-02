@@ -8,8 +8,8 @@
 Operational dashboard query giving a one-row-per-day view of patient volume at SSMM for the current month:
 
 - **IP load** — number of beds occupied that day (one per patient, latest assignment).
-- **OP load** — distinct ambulatory (`amb`) encounters created that day.
-- **Emergency load** — distinct emergency (`emer`) encounters created that day.
+- **OP load** — distinct ambulatory (`amb`) patients created that day.
+- **Emergency load** — distinct emergency (`emer`) patients created that day.
 
 
 ## Parameters
@@ -88,4 +88,4 @@ ORDER BY d.report_date;
 *Last updated: 2026-05-25*
 
 
-`````
+
