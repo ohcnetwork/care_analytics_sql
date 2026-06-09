@@ -1,7 +1,7 @@
 
 # Open Encounters Report - SSMM
 
-> List of currently open encounters (planned, in progress, or discharged) with the creating staff, patient details and SSMM ID
+> List of open encounters (planned, in progress, or discharged) with the creating staff, patient details and SSMM ID
 
 ## Purpose
 
