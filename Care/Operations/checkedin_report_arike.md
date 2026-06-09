@@ -10,7 +10,7 @@ Operational report for the Arike  team showing every appointment currently in th
 - Patient demographics (name, phone, gender, year of birth, ADM ID, deceased flag).
 - The practitioner the booking is with.
 - The slot's start datetime.
-- The staff member who created the booking.
+
 
 
 ## Parameters
@@ -48,6 +48,7 @@ LEFT JOIN emr_patientidentifier pi
  AND pi.config_id = 2
 WHERE sr.facility_id = 2
   AND tb.status = 'checked_in'
+  AND ts.deleted = FALSE
   --[[AND {{created_date}}]]
   --[[AND TRIM(pr.first_name || ' ' || pr.last_name) = {{practitioner}}]]
 ORDER BY patient_name;
