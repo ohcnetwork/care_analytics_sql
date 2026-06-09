@@ -16,17 +16,25 @@ Identifies patients with the highest volume of laboratory service requests at SS
 ## Query
 
 ```sql
+
 SELECT 
     DATE(sr.created_date) AS created_date,
     p.name AS patient_name,
     pi.value AS ssmm_id,
     COUNT(*) AS request_count
 FROM emr_servicerequest sr
-JOIN emr_patient p ON sr.patient_id = p.id
-LEFT JOIN emr_patientidentifier pi ON p.id = pi.patient_id AND pi.config_id = 21
+JOIN emr_patient p
+  ON sr.patient_id = p.id
+LEFT JOIN emr_patientidentifier pi
+  ON p.id = pi.patient_id
+ AND pi.config_id = 21
 WHERE sr.status = 'completed'
   AND sr.category = 'laboratory'
-GROUP BY DATE(sr.created_date), p.name, pi.value
+GROUP BY
+    sr.patient_id,
+    DATE(sr.created_date),
+    p.name,
+    pi.value
 ORDER BY request_count DESC;
 ```
 
