@@ -34,9 +34,7 @@ FROM emr_encounter e
 JOIN emr_patient p ON e.patient_id = p.id
 JOIN users_user u ON e.created_by_id = u.id
 LEFT JOIN emr_patientidentifier pi ON e.patient_id = pi.patient_id AND pi.config_id = 21
-WHERE e.deleted = FALSE
-  AND p.deleted = FALSE
-  AND e.status IN ('planned', 'in_progress', 'discharged')
+WHERE e.status IN ('planned', 'in_progress', 'discharged')
   AND (
     e.encounter_class != 'imp'
     OR EXISTS (
