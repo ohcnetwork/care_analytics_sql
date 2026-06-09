@@ -46,8 +46,9 @@ daily_occupied_beds AS (
           AND fl.root_location_id != 300
           AND fl.parent_id NOT IN (19, 44)
           AND fle.deleted = FALSE
+		  AND e.status NOT IN ('cancelled','entered_in_error')
           AND fle.start_datetime::date <= d.report_date
-          AND (fle.end_datetime IS NULL OR fle.end_datetime::date > d.report_date)
+          AND (fle.end_datetime IS NULL OR fle.end_datetime::date >= d.report_date)
         ORDER BY e.patient_id, fle.start_datetime DESC
     ) occupied
     GROUP BY d.report_date
@@ -58,6 +59,7 @@ encounters AS (
         created_date::date AS encounter_date,
         COUNT(DISTINCT patient_id) FILTER (WHERE encounter_class = 'amb') AS ambulatory_count,
         COUNT(DISTINCT patient_id) FILTER (WHERE encounter_class = 'emer') AS emergency_count
+        
     FROM emr_encounter
     WHERE deleted = FALSE
       AND created_date >= DATE_TRUNC('month', CURRENT_DATE - INTERVAL '1 day')
@@ -71,6 +73,7 @@ SELECT
     COALESCE(dob.occupied_bed_count, 0) AS occupied_bed_count,
     COALESCE(e.ambulatory_count, 0) AS ambulatory_count,
     COALESCE(e.emergency_count, 0) AS emergency_count
+    
 FROM dates d
 LEFT JOIN daily_occupied_beds dob ON d.report_date = dob.bed_date
 LEFT JOIN encounters e ON d.report_date = e.encounter_date
