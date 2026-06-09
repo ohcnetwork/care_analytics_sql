@@ -60,16 +60,6 @@ GROUP BY
 ORDER BY emr_paymentreconciliation.payment_datetime DESC;
 ```
 
-### Payment Method Codes
-
-| Code | Description |
-|------|-------------|
-| `cash` | Cash |
-| `ccca` | Credit Card |
-| `cdac` | Credit / Debit Account |
-| `chck` | Cheque |
-| `ddpo` | Demand Draft / Postal Order |
-| `debc` | Debit Card |
 
 ## Notes
 
