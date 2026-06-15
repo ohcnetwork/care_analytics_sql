@@ -70,7 +70,7 @@ FROM (
     JOIN first_visits fv
       ON fv.patient_id = yv.patient_id
      AND fv.performer_actor_id = yv.performer_actor_id
-    GROUP BY yv.doctor_name
+    GROUP BY yv.performer_actor_id, yv.doctor_name
 
     UNION ALL
 
