@@ -13,14 +13,14 @@ Daily operational report showing each doctor's OP load for the previous day, spl
 
 ## Parameters
 
-*No parameters — the report is always for `CURRENT_DATE − 1 day` (yesterday).*
+*No parameters — the report is always for `CURRENT_DATE - INTERVAL '1 day'` (yesterday).*
 
 ---
 
 ## Query
 
 ```sql
-WITH all_visits AS (
+WITH yesterday_visits AS (
     SELECT
         ci.patient_id,
         ci.performer_actor_id,
@@ -38,26 +38,34 @@ WITH all_visits AS (
       AND ci.performer_actor_id != 336
       AND ci.service_resource = 'appointment'
       AND tb.status IN ('checked_in', 'in_consultation', 'fulfilled')
+      AND ts.start_datetime >= CURRENT_DATE - INTERVAL '1 day'
+      AND ts.start_datetime < CURRENT_DATE
 ),
-
+yesterday_pairs AS (
+    SELECT DISTINCT
+        patient_id,
+        performer_actor_id
+    FROM yesterday_visits
+),
 first_visits AS (
     SELECT
-        patient_id,
-        performer_actor_id,
-        MIN(start_datetime) AS first_visit_datetime
-    FROM all_visits
-    GROUP BY patient_id, performer_actor_id
-),
-
-yesterday_visits AS (
-    SELECT
-        av.patient_id,
-        av.performer_actor_id,
-        av.doctor_name,
-        av.start_datetime
-    FROM all_visits av
-    WHERE av.start_datetime >= CURRENT_DATE - INTERVAL '1 day'
-      AND av.start_datetime < CURRENT_DATE
+        ci.patient_id,
+        ci.performer_actor_id,
+        MIN(ts.start_datetime) AS first_visit_datetime
+    FROM emr_tokenbooking tb
+    JOIN emr_tokenslot ts
+      ON tb.token_slot_id = ts.id
+    JOIN emr_chargeitem ci
+      ON tb.charge_item_id = ci.id
+    JOIN yesterday_pairs yp
+      ON yp.patient_id = ci.patient_id
+     AND yp.performer_actor_id = ci.performer_actor_id
+    WHERE ci.deleted = FALSE
+      AND ci.status IN ('paid', 'billed')
+      AND ci.performer_actor_id != 336
+      AND ci.service_resource = 'appointment'
+      AND tb.status IN ('checked_in', 'in_consultation', 'fulfilled')
+    GROUP BY ci.patient_id, ci.performer_actor_id
 )
 
 SELECT *
@@ -89,7 +97,7 @@ ORDER BY CASE WHEN doctor_name = 'Total' THEN 1 ELSE 0 END, doctor_name;
 
 ## Notes
 
-- **Date filter** — only bookings whose **slot** `start_datetime` falls on `CURRENT_DATE − 1` are counted.
+- **Date filter** — only bookings whose **slot** `start_datetime` falls between `CURRENT_DATE - INTERVAL '1 day'` (inclusive) and `CURRENT_DATE` (exclusive) are counted.
 - **Hardcoded values:**
   - `ci.performer_actor_id != 336` — excludes a specific user (casualty). Update or remove if that user changes.
 
