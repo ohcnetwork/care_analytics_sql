@@ -12,16 +12,12 @@ Returns the list of selected facility location records (`emr_facilitylocation`) 
 ## Query
 
 ```sql
-SELECT
-    id,
-    name
-FROM emr_facilitylocation
-WHERE id IN (
-    287, 296, 286, 284, 288, 239, 285, 291, 289, 282,
-    293, 292, 269, 20, 642, 55, 49, 290, 12, 9,
-    283, 295, 281, 294
-)
-ORDER BY name;
+select id,name from emr_facilitylocation fl where fl.deleted = FALSE
+   AND fl.status = 'active'
+   AND fl.id IN (
+     287, 296, 286, 284, 288, 239, 285, 291, 289, 282,
+     293, 292, 269, 20, 642, 55, 49, 290, 12, 9,
+     283, 295, 281, 294)
 ```
 
 ## Notes
