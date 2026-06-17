@@ -35,6 +35,7 @@ JOIN emr_organization org ON d.supplier_id = org.id
 WHERE p.status = 'active'
   AND p.facility_id = 11
   AND sd.status IN ('completed','in_progress')
+  AND d.status IN ('completed','pending')
   AND p.expiration_date >= date_trunc('month', CURRENT_DATE + INTERVAL '1 month')
   AND p.expiration_date <  date_trunc('month', CURRENT_DATE + INTERVAL '2 months')
   --[[AND pk.name = {{stock_name}}]]
