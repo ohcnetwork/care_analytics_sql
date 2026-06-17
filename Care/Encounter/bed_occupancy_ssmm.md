@@ -30,20 +30,20 @@ WITH all_beds AS (
       AND fl.status = 'active'
       AND fl.form = 'bd'
       AND fl.root_location_id != 300
+      AND fl.parent_id NOT IN (19, 44)
 ),
-
 occupied_beds AS (
     SELECT DISTINCT ON (e.patient_id)
-        fle.location_id AS bed_id
+        ab.bed_id
     FROM emr_facilitylocationencounter fle
-    INNER JOIN emr_encounter e ON fle.encounter_id = e.id
-    INNER JOIN all_beds ab ON fle.location_id = ab.bed_id  
+    JOIN emr_encounter e ON fle.encounter_id = e.id
+    JOIN all_beds ab ON ab.bed_id = fle.location_id
     WHERE fle.deleted = FALSE
+    AND fle.status IN ('active', 'reserved')
       --AND DATE(fle.start_datetime) <= {{report_date}}
       --AND (fle.end_datetime IS NULL OR DATE(fle.end_datetime) > {{report_date}})
     ORDER BY e.patient_id, fle.start_datetime DESC
 ),
-
 bed_stats AS (
     SELECT
         ab.level1_name,
@@ -60,10 +60,10 @@ SELECT * FROM (
     SELECT
         'Total' AS level1_name,
         'Total' AS floor,
-        SUM(total_bed_count) AS total_bed_count,
-        SUM(occupied_bed_count) AS occupied_bed_count
+        SUM(total_bed_count),
+        SUM(occupied_bed_count)
     FROM bed_stats
-) AS final_result
+) final_result
 ORDER BY CASE WHEN floor = 'Total' THEN 1 ELSE 0 END, floor, level1_name;
 ```
 
@@ -73,6 +73,7 @@ ORDER BY CASE WHEN floor = 'Total' THEN 1 ELSE 0 END, floor, level1_name;
 - **`occupied_beds` CTE** — for each patient, the latest bed assignment.
 - **Hardcoded values:**
   - `fl.root_location_id != 300` — excludes the fake beds root. Update if the fake-beds root ID changes.
+  - `fl.parent_id NOT IN (19, 44)` — excludes specific parent locations (In this case OT and casualty). Update these IDs if the excluded wards change.
   - `fl.form = 'bd'` — only bed-type facility locations.
   - `fl.status = 'active'` — only currently active beds count toward totals.
 - **`report_date` filter** — when provided, treats a bed as occupied if `start_datetime <= report_date` and (`end_datetime IS NULL` OR `end_datetime > report_date`).
