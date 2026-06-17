@@ -39,6 +39,7 @@ occupied_beds AS (
     JOIN emr_encounter e ON fle.encounter_id = e.id
     JOIN all_beds ab ON ab.bed_id = fle.location_id
     WHERE fle.deleted = FALSE
+    AND fle.status IN ('active', 'reserved')
       --AND DATE(fle.start_datetime) <= {{report_date}}
       --AND (fle.end_datetime IS NULL OR DATE(fle.end_datetime) > {{report_date}})
     ORDER BY e.patient_id, fle.start_datetime DESC
