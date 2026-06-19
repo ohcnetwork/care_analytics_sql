@@ -22,25 +22,26 @@ Returns the monthly count of lab `emr_servicerequest` records at SSMM, grouped b
 
 ```sql
 SELECT
-    TO_CHAR(DATE_TRUNC('month', sr.created_date), 'YYYY-MM') AS month,
-    rc.title AS category,
-    sr.status,
-    COUNT(sr.id) AS total_requests
+  TO_CHAR(DATE_TRUNC('month', sr.created_date), 'YYYY-MM') AS month,
+  rc.title AS category,
+  sr.status,
+  COUNT(DISTINCT sr.id) AS total_requests
 FROM emr_servicerequest sr
-JOIN emr_activitydefinition ad
-    ON ad.id = sr.activity_definition_id
+JOIN emr_activitydefinition ad 
+  ON ad.id = sr.activity_definition_id
 CROSS JOIN LATERAL unnest(ad.charge_item_definitions) AS cid_id
-JOIN emr_chargeitemdefinition cid
-    ON cid.id = cid_id
-JOIN emr_resourcecategory rc
-    ON rc.id = cid.category_id
-WHERE sr.category = 'laboratory'
+JOIN emr_chargeitemdefinition cid 
+  ON cid.id = cid_id
+JOIN emr_resourcecategory rc 
+  ON rc.id = cid.category_id
+WHERE sr.deleted = FALSE
+  AND sr.category = 'laboratory'
   AND rc.id IN (49, 50, 51, 52)
   --[[AND sr.status = {{service_request_status}}]]
   --[[AND rc.title = {{category}}]]
   --[[AND {{date}}]]
-GROUP BY month, rc.title, sr.status
-ORDER BY month DESC, rc.title, sr.status;
+GROUP BY DATE_TRUNC('month', sr.created_date), rc.title, sr.status
+ORDER BY DATE_TRUNC('month', sr.created_date) DESC, rc.title, sr.status;
 ```
 
 ## Notes
