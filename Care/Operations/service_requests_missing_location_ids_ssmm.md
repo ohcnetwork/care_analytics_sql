@@ -5,7 +5,7 @@
 
 ## Purpose
 
-Lists completed (`status = 'completed'`) service requests at SSMM where the `locations` array is empty / null.
+Lists completed (`status = 'completed'`) service requests at SSMM where the `locations` array is empty.
 
 ## Parameters
 
@@ -28,7 +28,7 @@ SELECT
 FROM emr_servicerequest sr
 WHERE sr.deleted = FALSE
   AND sr.status = 'completed'
-  AND array_length(sr.locations, 1) IS NULL
+   AND sr.locations = '{}'
   --[[AND {{date}}]]
 ORDER BY sr.created_date DESC;
 ```
