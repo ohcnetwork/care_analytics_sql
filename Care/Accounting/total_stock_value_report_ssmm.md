@@ -46,7 +46,6 @@ dispense_items AS (
         SUM(emd.quantity) AS qty,
         SUM(ep.purchase_price * emd.quantity) AS total_value
     FROM emr_medicationdispense emd
-    LEFT JOIN emr_dispenseorder edo ON edo.id = emd.order_id
     LEFT JOIN emr_inventoryitem eii ON eii.id = emd.item_id
     LEFT JOIN emr_product ep ON eii.product_id = ep.id
     LEFT JOIN emr_productknowledge epk ON ep.product_knowledge_id = epk.id
