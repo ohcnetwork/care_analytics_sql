@@ -24,7 +24,7 @@ Summarises billed / paid charge items at SSMM grouped by resource category, invo
 SELECT
     emr_resourcecategory.title AS category,
     emr_invoice.issue_date - INTERVAL '5 hours 30 minutes' AS issue_date,
-    TRIM(COALESCE(u.prefix || ' ', '') || u.first_name || ' ' || u.last_name) AS requested,
+    TRIM(COALESCE(u.prefix || ' ', '') || u.first_name || ' ' || u.last_name) AS doctor,
     SUM(emr_chargeitem.quantity) AS total_quantity,
     SUM(emr_chargeitem.total_price) AS total_price,
     SUM(
