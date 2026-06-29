@@ -87,7 +87,7 @@ ORDER BY stock_name;
 ## Notes
 
 - **`purchase_items` CTE** — external purchases only. Uses `edo.origin_id IS NULL` to filter to supply deliveries that originate from outside the facility
-- **`dispense_items` CTE** — outflow via medication dispenses to patients. Includes dispense orders in `completed / in_progress / draft` and dispenses in `completed / in_progress / preparation` to match what reduces stock in practice.
+- **`dispense_items` CTE** — outflow via medication dispenses to patients. Includes dispenses in `completed / in_progress / preparation` to match what reduces stock in practice.
 - **`mistake_items` CTE** — supply deliveries whose destination is one of the configured "mistake / correction" locations. These represent stock moved out for adjustments and is treated as outflow.
 - **Hardcoded values:**
   - `edo.destination_id IN (264,270,280,274,273,275,276,266,279,36,265,278,297,238,298,27,481,17,32,277)` — the list of "mistake / correction" destination locations. Update this list whenever new mistake/correction locations are added or old ones are retired.
