@@ -35,11 +35,8 @@ WITH purchase_items AS (
     LEFT JOIN emr_productknowledge epk ON ep.product_knowledge_id = epk.id
     WHERE esd.status = 'completed'
       AND edo.origin_id IS NULL
-      AND esd.deleted = FALSE
-      AND edo.deleted = FALSE
-      AND edo.status = 'completed'
       AND ep.purchase_price IS NOT NULL
-     --AND DATE(esd.created_date) <= {{selected_date}}
+      --AND DATE(esd.created_date) <= {{selected_date}}
     GROUP BY epk.name
 ),
 
@@ -53,10 +50,7 @@ dispense_items AS (
     LEFT JOIN emr_inventoryitem eii ON eii.id = emd.item_id
     LEFT JOIN emr_product ep ON eii.product_id = ep.id
     LEFT JOIN emr_productknowledge epk ON ep.product_knowledge_id = epk.id
-    WHERE edo.status IN ('completed', 'in_progress', 'draft')
-      AND emd.status IN ('completed', 'in_progress', 'preparation')
-      AND emd.deleted = FALSE
-      AND edo.deleted = FALSE
+    WHERE  emd.status IN ('completed', 'in_progress', 'preparation')
       AND ep.purchase_price IS NOT NULL
       --AND DATE(emd.created_date) <= {{selected_date}}
     GROUP BY epk.name
@@ -74,9 +68,6 @@ mistake_items AS (
     LEFT JOIN emr_productknowledge epk ON ep.product_knowledge_id = epk.id
     WHERE esd.status IN ('completed', 'in_progress')
       AND edo.destination_id IN (264,270,280,274,273,275,276,266,279,36,265,278,297,238,298,27,481,17,32,277)
-      AND esd.deleted = FALSE
-      AND edo.deleted = FALSE
-      AND edo.status IN ('completed', 'in_progress')
       AND ep.purchase_price IS NOT NULL
       --AND DATE(esd.created_date) <= {{selected_date}}
     GROUP BY epk.name
