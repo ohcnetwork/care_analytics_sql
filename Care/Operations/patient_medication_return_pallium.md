@@ -26,7 +26,7 @@ SELECT
     fl.name AS returned_to_destination,
     inv.number AS invoice_number,
     sd.created_date AS return_date,
-    TRIM(created_user.first_name || ' ' || COALESCE(created_user.last_name, '')) AS created_by
+    TRIM(created_user.first_name || ' ' || created_user.last_name, '') AS created_by
 FROM emr_supplydelivery sd
 JOIN emr_deliveryorder dorder
     ON sd.order_id = dorder.id
