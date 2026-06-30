@@ -42,6 +42,6 @@ ORDER BY
 
 
 ## Notes
-- Results are ordered by location, then stock name, then expiration date (earliest first) so each location's near-expiry items surface first within its group.
+- Results are ordered by location, then stock name.
 
 *Last updated: 2026-06-29*
