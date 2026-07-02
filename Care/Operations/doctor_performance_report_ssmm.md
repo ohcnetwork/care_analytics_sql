@@ -21,56 +21,53 @@ Summarises billed / paid charge items at SSMM grouped by resource category, invo
 ## Query
 
 ```sql
-SELECT
-    emr_resourcecategory.title AS category,
+SELECT 
+    emr_resourcecategory.title AS category, 
     emr_invoice.issue_date - INTERVAL '5 hours 30 minutes' AS issue_date,
-    TRIM(COALESCE(u.prefix || ' ', '') || u.first_name || ' ' || u.last_name) AS doctor,
+    TRIM(COALESCE(u.prefix || ' ', '') || u.first_name || ' ' || u.last_name) AS requested,
     SUM(emr_chargeitem.quantity) AS total_quantity,
     SUM(emr_chargeitem.total_price) AS total_price,
-    SUM(
-        emr_chargeitem.total_price
-      + COALESCE(discount_component.amount, 0)
-      - COALESCE(cgst_component.amount, 0)
-      - COALESCE(sgst_component.amount, 0)
-    ) AS amount
+   SUM(
+    emr_chargeitem.total_price
+    + COALESCE(price_components.discount_amount, 0)
+    - COALESCE(price_components.cgst_amount, 0)
+    - COALESCE(price_components.sgst_amount, 0)
+    - COALESCE(price_components.igst_amount, 0)
+) AS amount
 FROM emr_chargeitem
 JOIN emr_chargeitemdefinition
-    ON emr_chargeitem.charge_item_definition_id = emr_chargeitemdefinition.id
+  ON emr_chargeitem.charge_item_definition_id = emr_chargeitemdefinition.id
 JOIN emr_resourcecategory
-    ON emr_chargeitemdefinition.category_id = emr_resourcecategory.id
+  ON emr_chargeitemdefinition.category_id = emr_resourcecategory.id  
 LEFT JOIN users_user u
-    ON emr_chargeitem.performer_actor_id = u.id
+  ON emr_chargeitem.performer_actor_id = u.id 
 JOIN emr_invoice
-    ON emr_chargeitem.paid_invoice_id = emr_invoice.id
+  ON emr_chargeitem.paid_invoice_id = emr_invoice.id
 LEFT JOIN LATERAL (
-    SELECT (elem ->> 'amount')::numeric AS amount
+    SELECT 
+        SUM(CASE WHEN elem ->> 'monetary_component_type' = 'discount' 
+            THEN (elem ->> 'amount')::numeric ELSE 0 END) AS discount_amount,
+        SUM(CASE WHEN elem ->> 'monetary_component_type' = 'tax' 
+            AND elem -> 'code' ->> 'code' = 'cgst' 
+            THEN (elem ->> 'amount')::numeric ELSE 0 END) AS cgst_amount,
+        SUM(CASE WHEN elem ->> 'monetary_component_type' = 'tax' 
+            AND elem -> 'code' ->> 'code' = 'sgst' 
+            THEN (elem ->> 'amount')::numeric ELSE 0 END) AS sgst_amount,
+        SUM(CASE WHEN elem ->> 'monetary_component_type' = 'tax' 
+            AND elem -> 'code' ->> 'code' = 'igst' 
+            THEN (elem ->> 'amount')::numeric ELSE 0 END) AS igst_amount
     FROM jsonb_array_elements(emr_chargeitem.total_price_components) AS elem
-    WHERE elem ->> 'monetary_component_type' = 'discount'
-    LIMIT 1
-) discount_component ON TRUE
-LEFT JOIN LATERAL (
-    SELECT (elem ->> 'amount')::numeric AS amount
-    FROM jsonb_array_elements(emr_chargeitem.total_price_components) AS elem
-    WHERE elem ->> 'monetary_component_type' = 'tax'
-      AND elem -> 'code' ->> 'code' = 'cgst'
-    LIMIT 1
-) cgst_component ON TRUE
-LEFT JOIN LATERAL (
-    SELECT (elem ->> 'amount')::numeric AS amount
-    FROM jsonb_array_elements(emr_chargeitem.total_price_components) AS elem
-    WHERE elem ->> 'monetary_component_type' = 'tax'
-      AND elem -> 'code' ->> 'code' = 'sgst'
-    LIMIT 1
-) sgst_component ON TRUE
-WHERE emr_chargeitem.status IN ('paid','billed')
+) price_components ON TRUE
+WHERE emr_chargeitem.deleted = FALSE
+  AND emr_chargeitem.status IN ('paid','billed')
   AND emr_invoice.status IN ('issued','balanced')
-  --[[AND (emr_invoice.issue_date - INTERVAL '5 hours 30 minutes') >= {{start_date}}]]
-  --[[AND (emr_invoice.issue_date - INTERVAL '5 hours 30 minutes') <  {{end_date}} + INTERVAL '1 day']]
+  --[[AND emr_invoice.issue_date >= {{start_date}} + INTERVAL '5 hours 30 minutes']]
+  --[[AND emr_invoice.issue_date < {{end_date}} + INTERVAL '1 day' + INTERVAL '5 hours 30 minutes']]
   --[[AND TRIM(COALESCE(u.prefix || ' ', '') || u.first_name || ' ' || u.last_name) = {{doctor}}]]
   --[[AND emr_resourcecategory.title IN ({{category}})]]
-GROUP BY
+GROUP BY 
     emr_resourcecategory.title,
-    emr_invoice.issue_date - INTERVAL '5 hours 30 minutes',
+    emr_invoice.issue_date,
     TRIM(COALESCE(u.prefix || ' ', '') || u.first_name || ' ' || u.last_name)
 ORDER BY total_price DESC;
 ```
