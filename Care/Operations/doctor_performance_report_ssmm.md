@@ -5,7 +5,7 @@
 
 ## Purpose
 
-Summarises billed / paid charge items at SSMM grouped by resource category, invoice issue date, and the performer (doctor). For each group it reports the total quantity, total gross price, and a net `amount` calculated as `total_price + discount − CGST − SGST` 
+Summarises billed / paid charge items at SSMM grouped by resource category, invoice issue date, and the performer (doctor). For each group it reports the total quantity, total gross price, and a net `amount` calculated as `total_price + discount − CGST − SGST - IGST` 
 
 ## Parameters
 
@@ -74,7 +74,7 @@ ORDER BY total_price DESC;
 
 ## Notes
 
-- **`amount` formula:** `total_price + discount − CGST − SGST`. The discount is *added back* (it is stored as a negative-style component), and the CGST/SGST tax portions are subtracted to isolate the net revenue contribution.
+- **`amount` formula:** `total_price + discount − CGST − SGST - IGST`. The discount is *added back* (it is stored as a negative-style component), and the CGST/SGST tax portions are subtracted to isolate the net revenue contribution.
 - Results are ordered by `total_price DESC` so the highest-revenue groups surface first.
 
 *Last updated: 2026-06-29*
