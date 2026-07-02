@@ -29,9 +29,10 @@ WITH latest_mobility AS (
    
    AND emr_patient.deceased_datetime IS NULL
   CROSS JOIN LATERAL jsonb_array_elements(emr_questionnaireresponse.responses) AS rs
-  WHERE emr_questionnaireresponse.responses @> '[{"question_id": "e4b0d3f4-77fb-4fb6-9213-9c62fa6b5695"}]'::jsonb
-    
+  WHERE emr_questionnaireresponse.questionnaire_id = 69 
+  AND emr_questionnaireresponse.responses @> '[{"question_id": "e4b0d3f4-77fb-4fb6-9213-9c62fa6b5695"}]'::jsonb
     AND rs ->> 'question_id' = 'e4b0d3f4-77fb-4fb6-9213-9c62fa6b5695'
+   AND emr_questionnaireresponse.status = 'completed' 
     --[[AND {{date}}]]
   ORDER BY emr_questionnaireresponse.patient_id, emr_questionnaireresponse.created_date DESC
 )
@@ -44,6 +45,7 @@ FROM latest_mobility
 JOIN emr_organization
   ON emr_organization.id = ANY(latest_mobility.organization_cache)
  AND emr_organization.level_cache = 1
+
 GROUP BY emr_organization.name
 ORDER BY emr_organization.name;
 ```
