@@ -12,7 +12,7 @@ Returns the list of users assigned to a specific role (`emr_facilityorganization
 ## Query
 
 ```sql
-SELECT 
+SELECT DISTINCT
      TRIM(COALESCE(u.prefix || ' ', '') || u.first_name || ' ' || u.last_name, '') AS username,
 	sr.name AS role_name
 FROM emr_facilityorganizationuser efu
