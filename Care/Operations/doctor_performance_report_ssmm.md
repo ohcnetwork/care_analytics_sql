@@ -45,21 +45,13 @@ JOIN emr_invoice
   ON emr_chargeitem.paid_invoice_id = emr_invoice.id
 LEFT JOIN LATERAL (
     SELECT 
-        SUM(CASE WHEN elem ->> 'monetary_component_type' = 'discount' 
-            THEN (elem ->> 'amount')::numeric ELSE 0 END) AS discount_amount,
-        SUM(CASE WHEN elem ->> 'monetary_component_type' = 'tax' 
-            AND elem -> 'code' ->> 'code' = 'cgst' 
-            THEN (elem ->> 'amount')::numeric ELSE 0 END) AS cgst_amount,
-        SUM(CASE WHEN elem ->> 'monetary_component_type' = 'tax' 
-            AND elem -> 'code' ->> 'code' = 'sgst' 
-            THEN (elem ->> 'amount')::numeric ELSE 0 END) AS sgst_amount,
-        SUM(CASE WHEN elem ->> 'monetary_component_type' = 'tax' 
-            AND elem -> 'code' ->> 'code' = 'igst' 
-            THEN (elem ->> 'amount')::numeric ELSE 0 END) AS igst_amount
+        SUM((elem ->> 'amount')::numeric) FILTER (WHERE elem ->> 'monetary_component_type' = 'discount') AS discount_amount,
+        SUM((elem ->> 'amount')::numeric) FILTER (WHERE elem ->> 'monetary_component_type' = 'tax' AND elem -> 'code' ->> 'code' = 'cgst') AS cgst_amount,
+        SUM((elem ->> 'amount')::numeric) FILTER (WHERE elem ->> 'monetary_component_type' = 'tax' AND elem -> 'code' ->> 'code' = 'sgst') AS sgst_amount,
+        SUM((elem ->> 'amount')::numeric) FILTER (WHERE elem ->> 'monetary_component_type' = 'tax' AND elem -> 'code' ->> 'code' = 'igst') AS igst_amount
     FROM jsonb_array_elements(emr_chargeitem.total_price_components) AS elem
 ) price_components ON TRUE
-WHERE emr_chargeitem.deleted = FALSE
-  AND emr_chargeitem.status IN ('paid','billed')
+WHERE emr_chargeitem.status IN ('paid','billed')
   AND emr_invoice.status IN ('issued','balanced')
   --[[AND emr_invoice.issue_date >= {{start_date}} + INTERVAL '5 hours 30 minutes']]
   --[[AND emr_invoice.issue_date < {{end_date}} + INTERVAL '1 day' + INTERVAL '5 hours 30 minutes']]
