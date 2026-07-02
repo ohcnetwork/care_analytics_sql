@@ -12,13 +12,15 @@ Returns the list of users assigned to a specific role (`emr_facilityorganization
 ## Query
 
 ```sql
-SELECT
-    TRIM(COALESCE(u.prefix || ' ', '') || u.first_name || ' ' || u.last_name, '') AS username,
-    efu.role_id
+SELECT 
+     TRIM(COALESCE(u.prefix || ' ', '') || u.first_name || ' ' || u.last_name, '') AS username,
+	sr.name AS role_name
 FROM emr_facilityorganizationuser efu
-JOIN users_user u
-    ON efu.user_id = u.id
-WHERE efu.role_id = 3
+JOIN users_user u 
+  ON efu.user_id = u.id
+JOIN security_rolemodel sr
+  ON efu.role_id = sr.id
+WHERE sr.name = 'Nurse'
   AND efu.deleted = FALSE
 ORDER BY username;
 ```
