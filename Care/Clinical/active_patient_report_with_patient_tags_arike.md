@@ -27,47 +27,60 @@ An "active patient" is defined as one who:
 ## Query
 
 ```sql
-WITH active_patients AS (
+WITH 
+latest_encounters AS (
+    SELECT 
+        ee.patient_id,
+        MAX(ee.created_date) AS last_encounter_date
+    FROM emr_encounter ee
+    WHERE ee.created_date >= CURRENT_DATE - INTERVAL '100 days'
+      AND ee.facility_id = 2
+      AND ee.deleted = FALSE
+    GROUP BY ee.patient_id
+),
+
+
+next_appointments AS (
+    SELECT 
+        tb.patient_id,
+        MIN(ts.start_datetime) AS next_appointment_date
+    FROM emr_tokenbooking tb
+    JOIN emr_tokenslot ts ON tb.token_slot_id = ts.id
+    JOIN emr_schedulableresource sbr ON ts.resource_id = sbr.id
+    WHERE ts.start_datetime >= CURRENT_DATE
+      AND ts.start_datetime < CURRENT_DATE + INTERVAL '100 days'
+      AND sbr.facility_id = 2
+      AND tb.deleted = FALSE
+      AND ts.deleted = FALSE
+      AND tb.status IN ('booked', 'checked_in', 'in_consultation')
+    GROUP BY tb.patient_id
+),
+
+
+active_patients AS (
     SELECT DISTINCT
         ep.id AS patient_id,
         ep.name AS patient_name,
         ep.gender,
         ep.phone_number,
         pi.value AS adm,
-        ep.instance_tags
+        ep.instance_tags,
+        le.last_encounter_date,
+        na.next_appointment_date,
+        COALESCE(le.last_encounter_date, na.next_appointment_date) AS date
     FROM emr_patient ep
-    LEFT JOIN emr_patientidentifier pi
-        ON ep.id = pi.patient_id
-       AND pi.config_id = 2
-    WHERE ep.deceased_datetime IS NULL
+    LEFT JOIN emr_patientidentifier pi 
+        ON ep.id = pi.patient_id AND pi.config_id = 2
+    LEFT JOIN latest_encounters le ON ep.id = le.patient_id
+    LEFT JOIN next_appointments na ON ep.id = na.patient_id
+    WHERE LOWER(TRIM(ep.name)) NOT LIKE '%test%'
+      AND ep.deleted = FALSE
+      AND ep.deceased_datetime IS NULL
       AND NOT (70 = ANY(ep.instance_tags))
-      AND (
-          EXISTS (
-              SELECT 1
-              FROM emr_encounter ee
-              WHERE ee.patient_id   = ep.id
-                AND ee.created_date >= CURRENT_DATE - INTERVAL '100 days'
-                AND ee.facility_id  = 2
-                AND ee.deleted      = FALSE
-          )
-          OR
-          EXISTS (
-              SELECT 1
-              FROM emr_tokenbooking tb
-              JOIN emr_tokenslot ts
-                  ON tb.token_slot_id = ts.id
-              JOIN emr_schedulableresource sbr
-                  ON ts.resource_id = sbr.id
-              WHERE tb.patient_id      = ep.id
-                AND ts.start_datetime >= CURRENT_DATE
-                AND ts.start_datetime  < CURRENT_DATE + INTERVAL '100 days'
-                AND sbr.facility_id    = 2
-                AND tb.deleted         = FALSE
-                AND ts.deleted         = FALSE
-                AND tb.status IN ('booked', 'checked_in', 'in_consultation')
-          )
-      )
+      AND (le.patient_id IS NOT NULL OR na.patient_id IS NOT NULL) 
 ),
+
+
 patient_tags AS (
     SELECT
         ap.patient_id,
@@ -75,43 +88,22 @@ patient_tags AS (
         COALESCE(MAX(CASE WHEN et.parent_id = 71 THEN et.display END), 'unassigned') AS place_of_care
     FROM active_patients ap
     LEFT JOIN LATERAL unnest(ap.instance_tags) AS tag_id ON TRUE
-    LEFT JOIN emr_tagconfig et
-        ON et.id = tag_id
-       AND et.deleted = FALSE
+    LEFT JOIN emr_tagconfig et ON et.id = tag_id AND et.deleted = FALSE
     GROUP BY ap.patient_id
 )
-SELECT
+
+SELECT 
     ap.patient_name,
     ap.phone_number,
     ap.adm,
     ap.gender,
     pt.zone,
     pt.place_of_care,
-    COALESCE(
-        (SELECT MAX(ee.created_date)
-         FROM emr_encounter ee
-         WHERE ee.patient_id   = ap.patient_id
-           AND ee.created_date >= CURRENT_DATE - INTERVAL '100 days'
-           AND ee.facility_id  = 2),
-        (SELECT MIN(ts.start_datetime)
-         FROM emr_tokenbooking tb
-         JOIN emr_tokenslot ts
-             ON tb.token_slot_id = ts.id
-         JOIN emr_schedulableresource sbr
-             ON ts.resource_id = sbr.id
-         WHERE tb.patient_id      = ap.patient_id
-           AND ts.start_datetime >= CURRENT_DATE
-           AND ts.start_datetime  < CURRENT_DATE + INTERVAL '100 days'
-           AND sbr.facility_id    = 2
-           AND tb.deleted         = FALSE
-           AND ts.deleted         = FALSE
-           AND tb.status IN ('booked', 'checked_in', 'in_consultation'))
-    ) AS date
+    ap.date
 FROM active_patients ap
-LEFT JOIN patient_tags pt
-    ON pt.patient_id = ap.patient_id
+LEFT JOIN patient_tags pt ON pt.patient_id = ap.patient_id
 WHERE 1=1
-    --[[AND pt.zone = {{zone_filter}}]]
+   --[[AND pt.zone = {{zone_filter}}]]
     --[[AND pt.place_of_care = {{place_of_care}}]]
 ORDER BY ap.patient_name;
 ```
