@@ -82,7 +82,6 @@ ORDER BY d.report_date;
 
 ## Notes
 
-- **Date window** — `dates` CTE generates one row per day from the **start of the current month** through **yesterday** (`CURRENT_DATE - INTERVAL '1 day'`). Today is intentionally excluded so the report only shows completed days.
 - **Hardcoded values:**
   - `fl.root_location_id != 300` — excludes the fake beds root. Update if the fake-beds root ID changes.
   - `fl.parent_id NOT IN (19, 44)` — excludes specific parent locations. Update if the excluded wards change.
