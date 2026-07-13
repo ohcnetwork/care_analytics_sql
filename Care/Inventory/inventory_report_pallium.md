@@ -5,7 +5,7 @@
 
 ## Purpose
 
-Returns a full inventory snapshot with one row per inventory item . Each row shows the stock count, batch number, expiration date, unit purchase price, total purchase value (`stock_count × purchase_price`), and an `expiry_flag` that buckets each batch as **Expired**, **Critical (≤1 month)**, **Warning (≤3 months)**, or normal.
+Returns a full inventory snapshot with one row per inventory item. Each row shows the stock count, batch number, expiration date, unit purchase price, total purchase value (`stock_count × purchase_price`), and an `expiry_flag` that buckets each batch as **Expired**, **Critical (≤1 month)**, **Warning (≤3 months)**, or normal.
 
 ---
 
