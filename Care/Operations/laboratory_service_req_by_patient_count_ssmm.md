@@ -31,7 +31,6 @@ LEFT JOIN emr_patientidentifier pi
 WHERE sr.status = 'completed'
   AND sr.category = 'laboratory'
 GROUP BY
-    sr.patient_id,
     DATE(sr.created_date),
     p.name,
     pi.value
