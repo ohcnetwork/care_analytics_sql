@@ -37,11 +37,11 @@ WHERE fl.deleted = FALSE
 ORDER BY
     fl.name,
     pk.name,
-    expiration_date;
+    p.expiration_date;
 ```
 
 
 ## Notes
-- Results are ordered by location, then stock name.
+- Results are ordered by location, followed by stock name and expiry
 
 *Last updated: 2026-06-29*
