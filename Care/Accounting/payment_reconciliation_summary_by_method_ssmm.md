@@ -44,7 +44,6 @@ LEFT JOIN emr_patientidentifier pi
     ON emr_patient.id = pi.patient_id
    AND pi.config_id = 21
 WHERE emr_paymentreconciliation.status = 'active'
-AND emr_invoice.status NOT IN ('cancelled','enetered_in_error')
   --[[AND DATE(emr_paymentreconciliation.modified_date) = {{date}}]]
   --[[AND pi.value = {{ssmm_id}}]]
 GROUP BY
