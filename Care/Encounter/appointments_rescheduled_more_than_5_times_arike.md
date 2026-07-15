@@ -91,7 +91,7 @@ ORDER BY rb.patient_name;
 
 - **Hardcoded IDs:**
   - `facility_id = 2` — Arike facility.
-  - `pi.config_id = 2` — ADM patient identifier configuration.
+  - `emr_patientidentifier.config_id = 2` — ADM patient identifier configuration.
   - `parent_id = 55` — parent tag for **zone**.
   Update if the configuration changes.
 - Results are ordered alphabetically by patient name.
