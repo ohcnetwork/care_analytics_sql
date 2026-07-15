@@ -7,8 +7,8 @@
 
 Daily operational report showing each doctor's OP load for the previous day, split into:
 
-- **New** — first ever consultation between that patient and that doctor.
-- **Revisit** — any subsequent consultation between the same patient and doctor.
+- **New** — first paid/billed consultation between that patient and that doctor.
+- **Revisit** — any subsequent paid/billed consultation between the same patient and doctor.
 
 
 ## Parameters
@@ -68,7 +68,8 @@ first_visits AS (
     GROUP BY emr_chargeitem.patient_id, emr_chargeitem.performer_actor_id
 )
 
-SELECT 
+SELECT
+    performer_actor_id AS doctor_id,
     doctor_name,
     new,
     revisit
@@ -104,7 +105,7 @@ ORDER BY CASE WHEN doctor_name = 'Total' THEN 1 ELSE 0 END, doctor_name, perform
 
 - **Date filter** — only bookings whose **slot** `start_datetime` falls between `CURRENT_DATE - INTERVAL '1 day'` (inclusive) and `CURRENT_DATE` (exclusive) are counted.
 - **Hardcoded values:**
-  - `ci.performer_actor_id != 336` — excludes a specific user (casualty). Update or remove if that user changes.
+  - `emr_chargeitem.performer_actor_id != 336` — excludes a specific user (casualty). Update or remove if that user changes.
 
 *Last updated: 2026-05-25*
 
