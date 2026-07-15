@@ -50,7 +50,7 @@ doctor_visits AS (
 )
 SELECT
     facility_facility.name AS facility_name,
-    COUNT(DISTINCT doctor_visits.response_id) AS doctor_only_visit_count
+    COUNT(DISTINCT doctor_visits.response_id) AS visit_count
 FROM doctor_visits
 INNER JOIN emr_encounter
     ON emr_encounter.id = doctor_visits.encounter_id
@@ -58,7 +58,7 @@ INNER JOIN facility_facility
     ON facility_facility.id = emr_encounter.facility_id
    AND facility_facility.deleted = FALSE
 GROUP BY facility_facility.name
-ORDER BY doctor_only_visit_count DESC, facility_facility.name;
+ORDER BY visit_count DESC, facility_facility.name;
 ```
 
 ## Notes
