@@ -23,8 +23,8 @@ SELECT
     DATE(sd.created_date) AS created_date,
     fl_origin.name AS origin_location,
     fl_destination.name AS destination_location,
-    sd.status,
-    delivery_order.status,
+    sd.status AS supply_delivery_status,
+    delivery_order.status AS delivery_order_status,
     SUM(sd.supplied_item_quantity) AS total_quantity,
     SUM(p.purchase_price * sd.supplied_item_quantity) AS total_purchase_price
 FROM emr_supplydelivery sd
