@@ -38,7 +38,7 @@ current_occ AS (
     SELECT
         COALESCE(gp.name, p.name) AS floor,
         p.name AS ward,
-        COUNT(DISTINCT fle.id) AS occupied_beds
+        COUNT(DISTINCT fl.id) AS occupied_beds
     FROM emr_facilitylocationencounter fle
     INNER JOIN emr_facilitylocation fl ON fle.location_id = fl.id
     LEFT JOIN emr_facilitylocation p ON fl.parent_id = p.id
