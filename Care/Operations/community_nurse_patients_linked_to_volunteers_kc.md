@@ -41,8 +41,7 @@ filtered_encounters AS (
 nurse_responses AS (
     SELECT DISTINCT
         emr_questionnaireresponse.patient_id,
-        emr_questionnaireresponse.encounter_id,
-        DATE(emr_questionnaireresponse.created_date) AS visit_date
+        emr_questionnaireresponse.encounter_id
     FROM emr_questionnaireresponse
     INNER JOIN filtered_encounters
         ON filtered_encounters.id = emr_questionnaireresponse.encounter_id
