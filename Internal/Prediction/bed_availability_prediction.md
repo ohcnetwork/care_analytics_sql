@@ -50,13 +50,26 @@ current_occ AS (
       AND (fle.end_datetime IS NULL OR fle.end_datetime > NOW())
     GROUP BY 1, 2
 ),
-patterns AS (
+-- Actual count of each day-of-week in the 90-day lookback window (12 or 13)
+dow_occurrences AS (
     SELECT
-        floor,
-        ward,
-        dow,
-        SUM(admit_count) / 13.0 AS avg_admits,
-        SUM(discharge_count) / 13.0 AS avg_discharges
+        EXTRACT(DOW FROM d) AS dow,
+        COUNT(*) AS occurrences
+    FROM generate_series(
+        date_trunc('day', NOW()) - INTERVAL '90 days',
+        date_trunc('day', NOW()) - INTERVAL '1 day',
+        INTERVAL '1 day'
+    ) AS d
+    GROUP BY 1
+),
+patterns AS (
+    -- Admissions grouped by admission DOW; discharges grouped by discharge DOW
+    SELECT
+        combined.floor,
+        combined.ward,
+        combined.dow,
+        SUM(combined.admit_count)     / docc.occurrences::float AS avg_admits,
+        SUM(combined.discharge_count) / docc.occurrences::float AS avg_discharges
     FROM (
         -- Admissions by admission day-of-week
         SELECT
@@ -72,11 +85,12 @@ patterns AS (
         WHERE fl_a.deleted = FALSE AND fl_a.status = 'active'
           AND fl_a.form = 'bd' AND fle_a.deleted = FALSE
           AND fl_a.root_location_id != 300
-          AND fle_a.start_datetime > NOW() - INTERVAL '90 days'
+          AND fle_a.start_datetime >= date_trunc('day', NOW()) - INTERVAL '90 days'
+          AND fle_a.start_datetime <  date_trunc('day', NOW())
         GROUP BY 1, 2, 3
-        
+
         UNION ALL
-        
+
         -- Discharges by discharge day-of-week
         SELECT
             COALESCE(gp_d.name, p_d.name) AS floor,
@@ -91,11 +105,13 @@ patterns AS (
         WHERE fl_d.deleted = FALSE AND fl_d.status = 'active'
           AND fl_d.form = 'bd' AND fle_d.deleted = FALSE
           AND fl_d.root_location_id != 300
-          AND fle_d.end_datetime > NOW() - INTERVAL '90 days'
           AND fle_d.end_datetime IS NOT NULL
+          AND fle_d.end_datetime >= date_trunc('day', NOW()) - INTERVAL '90 days'
+          AND fle_d.end_datetime <  date_trunc('day', NOW())
         GROUP BY 1, 2, 3
     ) combined
-    GROUP BY 1, 2, 3
+    JOIN dow_occurrences docc ON docc.dow = combined.dow
+    GROUP BY 1, 2, 3, docc.occurrences
 ),
 days AS (
     SELECT generate_series(
@@ -127,13 +143,13 @@ SELECT
     ward,
     forecast_day,
     total_beds,
-    ROUND(LEAST(GREATEST(occupied_beds + cum_net_flow, 0), total_beds)) AS predicted_occupied,
-    total_beds - ROUND(LEAST(GREATEST(occupied_beds + cum_net_flow, 0), total_beds)) AS predicted_vacancies,
-    ROUND(100.0 * LEAST(GREATEST(occupied_beds + cum_net_flow, 0), total_beds) / total_beds, 1) AS predicted_occupancy_pct,
+    ROUND(LEAST(GREATEST(occupied_beds + cum_net_flow, 0), total_beds)::numeric) AS predicted_occupied,
+    total_beds - ROUND(LEAST(GREATEST(occupied_beds + cum_net_flow, 0), total_beds)::numeric) AS predicted_vacancies,
+    ROUND((100.0 * LEAST(GREATEST(occupied_beds + cum_net_flow, 0), total_beds) / total_beds)::numeric, 1) AS predicted_occupancy_pct,
     CASE WHEN (occupied_beds + cum_net_flow) / total_beds::float >= {{bottleneck_threshold}}
          THEN 'BOTTLENECK RISK' ELSE 'OK' END AS status
 FROM forecast
-ORDER BY floor, ward, forecast_day;
+ORDER BY floor, ward, forecast_day
 ```
 
 ## Notes
