@@ -50,7 +50,7 @@ current_occ AS (
       AND (fle.end_datetime IS NULL OR fle.end_datetime > NOW())
     GROUP BY 1, 2
 ),
--- Actual count of each day-of-week in the 90-day lookback window (12 or 13)
+
 dow_occurrences AS (
     SELECT
         EXTRACT(DOW FROM d) AS dow,
@@ -63,7 +63,7 @@ dow_occurrences AS (
     GROUP BY 1
 ),
 patterns AS (
-    -- Admissions grouped by admission DOW; discharges grouped by discharge DOW
+   
     SELECT
         combined.floor,
         combined.ward,
@@ -71,7 +71,7 @@ patterns AS (
         SUM(combined.admit_count)     / docc.occurrences::float AS avg_admits,
         SUM(combined.discharge_count) / docc.occurrences::float AS avg_discharges
     FROM (
-        -- Admissions by admission day-of-week
+        
         SELECT
             COALESCE(gp_a.name, p_a.name) AS floor,
             p_a.name AS ward,
@@ -91,7 +91,7 @@ patterns AS (
 
         UNION ALL
 
-        -- Discharges by discharge day-of-week
+        
         SELECT
             COALESCE(gp_d.name, p_d.name) AS floor,
             p_d.name AS ward,
