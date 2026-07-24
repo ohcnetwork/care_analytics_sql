@@ -51,20 +51,50 @@ current_occ AS (
     GROUP BY 1, 2
 ),
 patterns AS (
-    
     SELECT
-        COALESCE(gp.name, p.name) AS floor,
-        p.name AS ward,
-        EXTRACT(DOW FROM fle.start_datetime) AS dow,
-        COUNT(*) FILTER (WHERE fle.start_datetime > NOW() - INTERVAL '90 days') / 13.0 AS avg_admits,
-        COUNT(*) FILTER (WHERE fle.end_datetime  > NOW() - INTERVAL '90 days') / 13.0 AS avg_discharges
-    FROM emr_facilitylocationencounter fle
-    INNER JOIN emr_facilitylocation fl ON fle.location_id = fl.id
-    LEFT JOIN emr_facilitylocation p ON fl.parent_id = p.id
-    LEFT JOIN emr_facilitylocation gp ON p.parent_id = gp.id
-    WHERE fl.deleted = FALSE AND fl.status = 'active'
-      AND fl.form = 'bd' AND fle.deleted = FALSE
-      AND fl.root_location_id != 300
+        floor,
+        ward,
+        dow,
+        SUM(admit_count) / 13.0 AS avg_admits,
+        SUM(discharge_count) / 13.0 AS avg_discharges
+    FROM (
+        -- Admissions by admission day-of-week
+        SELECT
+            COALESCE(gp_a.name, p_a.name) AS floor,
+            p_a.name AS ward,
+            EXTRACT(DOW FROM fle_a.start_datetime) AS dow,
+            COUNT(*) AS admit_count,
+            0 AS discharge_count
+        FROM emr_facilitylocationencounter fle_a
+        INNER JOIN emr_facilitylocation fl_a ON fle_a.location_id = fl_a.id
+        LEFT JOIN emr_facilitylocation p_a ON fl_a.parent_id = p_a.id
+        LEFT JOIN emr_facilitylocation gp_a ON p_a.parent_id = gp_a.id
+        WHERE fl_a.deleted = FALSE AND fl_a.status = 'active'
+          AND fl_a.form = 'bd' AND fle_a.deleted = FALSE
+          AND fl_a.root_location_id != 300
+          AND fle_a.start_datetime > NOW() - INTERVAL '90 days'
+        GROUP BY 1, 2, 3
+        
+        UNION ALL
+        
+        -- Discharges by discharge day-of-week
+        SELECT
+            COALESCE(gp_d.name, p_d.name) AS floor,
+            p_d.name AS ward,
+            EXTRACT(DOW FROM fle_d.end_datetime) AS dow,
+            0 AS admit_count,
+            COUNT(*) AS discharge_count
+        FROM emr_facilitylocationencounter fle_d
+        INNER JOIN emr_facilitylocation fl_d ON fle_d.location_id = fl_d.id
+        LEFT JOIN emr_facilitylocation p_d ON fl_d.parent_id = p_d.id
+        LEFT JOIN emr_facilitylocation gp_d ON p_d.parent_id = gp_d.id
+        WHERE fl_d.deleted = FALSE AND fl_d.status = 'active'
+          AND fl_d.form = 'bd' AND fle_d.deleted = FALSE
+          AND fl_d.root_location_id != 300
+          AND fle_d.end_datetime > NOW() - INTERVAL '90 days'
+          AND fle_d.end_datetime IS NOT NULL
+        GROUP BY 1, 2, 3
+    ) combined
     GROUP BY 1, 2, 3
 ),
 days AS (
