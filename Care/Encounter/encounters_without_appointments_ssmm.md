@@ -1,7 +1,7 @@
 
 # Encounters Without Appointments 
 
-> One row per patient's earliest op encounter that was created without a linked appointment
+> Identifies patient's op encounter that was created without a linked appointment
 
 ## Purpose
 
@@ -33,7 +33,7 @@ LEFT JOIN users_user u
     ON e.created_by_id = u.id
 WHERE e.encounter_class = 'amb'
   AND e.appointment_id IS NULL
-  --AND {{date}}
+  --[[AND {{date}}]]
 ORDER BY e.patient_id, e.created_date;
 ```
 
