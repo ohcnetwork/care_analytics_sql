@@ -22,24 +22,35 @@ Counts completed responses to the MLSP questionnaire (`questionnaire_id = 69`) p
 WITH org_id AS (
     SELECT emr_organization.id
     FROM emr_organization
-    WHERE emr_organization.deleted = FALSE
+    WHERE emr_organization.deleted = false
       --AND emr_organization.external_id::text = {{organization_id}}
 ),
-filtered_patients AS (
-    SELECT emr_patient.id
-    FROM emr_patient
-    INNER JOIN org_id ON TRUE
-    WHERE emr_patient.deceased_datetime IS NULL
-      AND emr_patient.organization_cache && ARRAY[org_id.id]::integer[]
+filtered_encounters AS (
+    SELECT
+        emr_encounter.id,
+        emr_encounter.patient_id,
+        emr_encounter.facility_id
+    FROM emr_encounter
+    INNER JOIN facility_facility
+        ON facility_facility.id = emr_encounter.facility_id
+       AND facility_facility.deleted = false
+    INNER JOIN org_id
+        ON facility_facility.geo_organization_cache && ARRAY[org_id.id]::integer[]
+    WHERE emr_encounter.status NOT IN ('entered_in_error', 'cancelled')
 ),
 visits AS (
     SELECT
         emr_questionnaireresponse.id,
         emr_questionnaireresponse.encounter_id
     FROM emr_questionnaireresponse
-    INNER JOIN filtered_patients
-        ON filtered_patients.id = emr_questionnaireresponse.patient_id
-    WHERE emr_questionnaireresponse.questionnaire_id = 69
+    INNER JOIN filtered_encounters
+        ON filtered_encounters.id = emr_questionnaireresponse.encounter_id
+    INNER JOIN emr_patient
+        ON emr_patient.id = emr_questionnaireresponse.patient_id
+       AND emr_patient.deleted = false
+       AND emr_patient.deceased_datetime IS NULL
+    WHERE emr_questionnaireresponse.deleted = false
+      AND emr_questionnaireresponse.questionnaire_id = 69
       AND emr_questionnaireresponse.status = 'completed'
       AND emr_questionnaireresponse.encounter_id IS NOT NULL
       --[[AND {{date}}]]
@@ -50,11 +61,12 @@ SELECT
 FROM visits
 INNER JOIN emr_encounter
     ON emr_encounter.id = visits.encounter_id
+   AND emr_encounter.deleted = false
 INNER JOIN facility_facility
     ON facility_facility.id = emr_encounter.facility_id
-   AND facility_facility.deleted = FALSE
+   AND facility_facility.deleted = false
 GROUP BY facility_facility.name
-ORDER BY visit_count DESC, facility_facility.name;
+ORDER BY  facility_facility.name;
 ```
 
 ## Notes
