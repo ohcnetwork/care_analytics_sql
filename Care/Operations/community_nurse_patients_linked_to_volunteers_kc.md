@@ -50,7 +50,7 @@ nurse_responses AS (
       AND emr_questionnaireresponse.status = 'completed'
       AND emr_questionnaireresponse.encounter_id IS NOT NULL
       AND response_element ->> 'question_id' in ('d602b9b2-d4cd-43d7-99d3-3d0169095eba', 'edf6799d-88c4-4f9d-8ced-552dde6ad6af')
-      AND response_element -> 'values' -> 0 ->> 'value' IN ()'Community Nurse')
+      AND response_element -> 'values' -> 0 ->> 'value' IN ('Community Nurse')
       --[[AND {{date}}]]
 ),
 homecare_patients_by_facility AS (
