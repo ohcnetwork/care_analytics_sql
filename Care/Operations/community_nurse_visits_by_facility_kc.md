@@ -51,10 +51,6 @@ community_nurse_visits AS (
     ) AS filtered_encounters
     INNER JOIN emr_questionnaireresponse
         ON emr_questionnaireresponse.encounter_id = filtered_encounters.encounter_id
-    INNER JOIN emr_patient
-        ON emr_patient.id = emr_questionnaireresponse.patient_id
-       AND emr_patient.deleted = false
-       AND emr_patient.deceased_datetime IS NULL
     CROSS JOIN LATERAL jsonb_array_elements(emr_questionnaireresponse.responses) AS response_element
     CROSS JOIN LATERAL jsonb_array_elements(response_element -> 'values') AS answer_element
     WHERE emr_questionnaireresponse.deleted = false
