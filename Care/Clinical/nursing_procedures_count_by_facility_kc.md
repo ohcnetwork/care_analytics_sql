@@ -29,7 +29,6 @@ WITH org_id AS (
 filtered_encounters AS (
     SELECT
         emr_encounter.id,
-        emr_encounter.patient_id,
         facility_facility.name AS facility_name
     FROM emr_encounter
     INNER JOIN facility_facility
