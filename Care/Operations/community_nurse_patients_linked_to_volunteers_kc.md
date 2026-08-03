@@ -45,9 +45,6 @@ nurse_responses AS (
     FROM emr_questionnaireresponse
     INNER JOIN filtered_encounters
         ON filtered_encounters.id = emr_questionnaireresponse.encounter_id
-    INNER JOIN emr_patient
-        ON emr_patient.id = emr_questionnaireresponse.patient_id
-       AND emr_patient.deceased_datetime IS NULL
     CROSS JOIN LATERAL jsonb_array_elements(emr_questionnaireresponse.responses) AS response_element
     WHERE emr_questionnaireresponse.questionnaire_id IN (3,67)
       AND emr_questionnaireresponse.status = 'completed'
