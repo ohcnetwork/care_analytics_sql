@@ -46,10 +46,6 @@ procedure_rows AS (
     FROM emr_questionnaireresponse
     INNER JOIN filtered_encounters
         ON filtered_encounters.id = emr_questionnaireresponse.encounter_id
-    INNER JOIN emr_patient
-        ON emr_patient.id = emr_questionnaireresponse.patient_id
-       AND emr_patient.deleted = FALSE
-       AND emr_patient.deceased_datetime IS NULL
     CROSS JOIN LATERAL jsonb_array_elements(emr_questionnaireresponse.responses) AS proc_resp
     CROSS JOIN LATERAL jsonb_array_elements(proc_resp -> 'values') AS proc_val
     WHERE emr_questionnaireresponse.deleted = FALSE
