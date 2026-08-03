@@ -45,10 +45,6 @@ visits AS (
     FROM emr_questionnaireresponse
     INNER JOIN filtered_encounters
         ON filtered_encounters.id = emr_questionnaireresponse.encounter_id
-    INNER JOIN emr_patient
-        ON emr_patient.id = emr_questionnaireresponse.patient_id
-       AND emr_patient.deleted = false
-       AND emr_patient.deceased_datetime IS NULL
     WHERE emr_questionnaireresponse.deleted = false
       AND emr_questionnaireresponse.questionnaire_id = 69
       AND emr_questionnaireresponse.status = 'completed'
