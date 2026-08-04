@@ -5,13 +5,13 @@
 
 ## Purpose
 
-Forecasts bed occupancy for each floor/ward over the next 7 days by combining current occupancy with historical (90-day) day-of-week admission and discharge patterns. Applies tunable multipliers to account for known surges or slowdowns, and flags any ward/day projected to cross an occupancy threshold as a `BOTTLENECK RISK`.
+Forecasts bed occupancy for each floor/ward over the next 24 hours by combining current occupancy with historical (365-day) day-of-week admission and discharge patterns. Applies tunable multipliers to account for known surges or slowdowns, and flags any ward/day projected to cross an occupancy threshold as a `BOTTLENECK RISK`.
 
 ## Parameters
 
 | Variable | Default | Meaning | When to change it |
 |----------|---------|---------|--------------------|
-| `admission_multiplier` | `1.0` | Scales expected admissions vs. the 90-day average. `1.0` = normal, `1.2` = expect 20% more admissions, `0.8` = expect 20% fewer | Festival/flu season surge → `1.2`–`1.5`. Holiday period with fewer elective admits → `0.7`–`0.9` |
+| `admission_multiplier` | `1.0` | Scales expected admissions vs. the 365-day average. `1.0` = normal, `1.2` = expect 20% more admissions, `0.8` = expect 20% fewer | Festival/flu season surge → `1.2`–`1.5`. Holiday period with fewer elective admits → `0.7`–`0.9` |
 | `turnover_multiplier` | `1.0` | Scales expected discharges. `1.0` = normal discharge pace, `1.2` = faster discharges, `0.8` = slower | Discharge drive/faster turnover initiative → `1.1`–`1.3`. Long weekend when doctors discharge fewer patients → `0.7`–`0.9` |
 | `bottleneck_threshold` | `0.90` | Occupancy % (as a fraction) at which a ward gets flagged as `"BOTTLENECK RISK"` | ICU/critical wards may warrant `0.80` (flag earlier). General wards may tolerate `0.95` |
 
@@ -50,32 +50,31 @@ current_occ AS (
       AND (fle.end_datetime IS NULL OR fle.end_datetime > NOW())
     GROUP BY 1, 2
 ),
-
 dow_occurrences AS (
     SELECT
         EXTRACT(DOW FROM d) AS dow,
         COUNT(*) AS occurrences
     FROM generate_series(
-        date_trunc('day', NOW()) - INTERVAL '90 days',
+        date_trunc('day', NOW()) - INTERVAL '365 days',
         date_trunc('day', NOW()) - INTERVAL '1 day',
         INTERVAL '1 day'
     ) AS d
     GROUP BY 1
 ),
 patterns AS (
-   
     SELECT
         combined.floor,
         combined.ward,
         combined.dow,
+        combined.hr,
         SUM(combined.admit_count)     / docc.occurrences::float AS avg_admits,
         SUM(combined.discharge_count) / docc.occurrences::float AS avg_discharges
     FROM (
-        
         SELECT
             COALESCE(gp_a.name, p_a.name) AS floor,
             p_a.name AS ward,
-            EXTRACT(DOW FROM fle_a.start_datetime) AS dow,
+            EXTRACT(DOW  FROM fle_a.start_datetime) AS dow,
+            EXTRACT(HOUR FROM fle_a.start_datetime) AS hr,
             COUNT(*) AS admit_count,
             0 AS discharge_count
         FROM emr_facilitylocationencounter fle_a
@@ -85,17 +84,17 @@ patterns AS (
         WHERE fl_a.deleted = FALSE AND fl_a.status = 'active'
           AND fl_a.form = 'bd' AND fle_a.deleted = FALSE
           AND fl_a.root_location_id != 300
-          AND fle_a.start_datetime >= date_trunc('day', NOW()) - INTERVAL '90 days'
+          AND fle_a.start_datetime >= date_trunc('day', NOW()) - INTERVAL '365 days'
           AND fle_a.start_datetime <  date_trunc('day', NOW())
-        GROUP BY 1, 2, 3
+        GROUP BY 1, 2, 3, 4
 
         UNION ALL
 
-        
         SELECT
             COALESCE(gp_d.name, p_d.name) AS floor,
             p_d.name AS ward,
-            EXTRACT(DOW FROM fle_d.end_datetime) AS dow,
+            EXTRACT(DOW  FROM fle_d.end_datetime) AS dow,
+            EXTRACT(HOUR FROM fle_d.end_datetime) AS hr,
             0 AS admit_count,
             COUNT(*) AS discharge_count
         FROM emr_facilitylocationencounter fle_d
@@ -106,50 +105,65 @@ patterns AS (
           AND fl_d.form = 'bd' AND fle_d.deleted = FALSE
           AND fl_d.root_location_id != 300
           AND fle_d.end_datetime IS NOT NULL
-          AND fle_d.end_datetime >= date_trunc('day', NOW()) - INTERVAL '90 days'
+          AND fle_d.end_datetime >= date_trunc('day', NOW()) - INTERVAL '365 days'
           AND fle_d.end_datetime <  date_trunc('day', NOW())
-        GROUP BY 1, 2, 3
+        GROUP BY 1, 2, 3, 4
     ) combined
     JOIN dow_occurrences docc ON docc.dow = combined.dow
-    GROUP BY 1, 2, 3, docc.occurrences
+    GROUP BY 1, 2, 3, 4, docc.occurrences
 ),
-days AS (
+
+next24 AS (
     SELECT generate_series(
-        date_trunc('day', NOW()) + INTERVAL '1 day',
-        date_trunc('day', NOW()) + INTERVAL '7 days',
-        INTERVAL '1 day'
-    ) AS forecast_day
+        date_trunc('hour', NOW()),
+        date_trunc('hour', NOW()) + INTERVAL '23 hours',
+        INTERVAL '1 hour'
+    ) AS slot
 ),
-forecast AS (
+
+net_flow_24h AS (
     SELECT
         c.floor,
         c.ward,
-        c.total_beds,
-        d.forecast_day,
-        COALESCE(co.occupied_beds, 0) AS occupied_beds,
         SUM(
             COALESCE(pt.avg_admits, 0)     * {{admission_multiplier}}
           - COALESCE(pt.avg_discharges, 0) * {{turnover_multiplier}}
-        ) OVER (PARTITION BY c.floor, c.ward ORDER BY d.forecast_day) AS cum_net_flow
+        ) AS net_flow
     FROM capacity c
-    CROSS JOIN days d
-    LEFT JOIN current_occ co ON co.floor = c.floor AND co.ward = c.ward
+    CROSS JOIN next24 n
     LEFT JOIN patterns pt
         ON pt.floor = c.floor AND pt.ward = c.ward
-       AND pt.dow = EXTRACT(DOW FROM d.forecast_day)
+       AND pt.dow = EXTRACT(DOW  FROM n.slot)
+       AND pt.hr  = EXTRACT(HOUR FROM n.slot)
+    GROUP BY 1, 2
+),
+forecast_rounded AS (
+    SELECT
+        c.floor,
+        c.ward,
+        NOW() + INTERVAL '24 hours' AS prediction_for,
+        c.total_beds,
+        COALESCE(co.occupied_beds, 0) AS current_occupied,
+        ROUND(LEAST(GREATEST(
+            COALESCE(co.occupied_beds, 0) + COALESCE(nf.net_flow, 0), 0
+        ), c.total_beds)::numeric) AS predicted_occupied
+    FROM capacity c
+    LEFT JOIN current_occ co ON co.floor = c.floor AND co.ward = c.ward
+    LEFT JOIN net_flow_24h nf ON nf.floor = c.floor AND nf.ward = c.ward
 )
 SELECT
     floor,
     ward,
-    forecast_day,
+    prediction_for,
     total_beds,
-    ROUND(LEAST(GREATEST(occupied_beds + cum_net_flow, 0), total_beds)::numeric) AS predicted_occupied,
-    total_beds - ROUND(LEAST(GREATEST(occupied_beds + cum_net_flow, 0), total_beds)::numeric) AS predicted_vacancies,
-    ROUND((100.0 * LEAST(GREATEST(occupied_beds + cum_net_flow, 0), total_beds) / total_beds)::numeric, 1) AS predicted_occupancy_pct,
-    CASE WHEN (occupied_beds + cum_net_flow) / total_beds::float >= {{bottleneck_threshold}}
-         THEN 'BOTTLENECK RISK' ELSE 'OK' END AS status
-FROM forecast
-ORDER BY floor, ward, forecast_day
+    current_occupied,
+    predicted_occupied,
+    total_beds - predicted_occupied                               AS predicted_vacancies,
+    ROUND((100.0 * predicted_occupied / total_beds)::numeric, 1) AS predicted_occupancy_pct,
+    CASE WHEN predicted_occupied / total_beds::float >= {{bottleneck_threshold}}
+         THEN 'BOTTLENECK RISK' ELSE 'OK' END                    AS status
+FROM forecast_rounded
+ORDER BY floor, ward;
 ```
 
 ## Notes
