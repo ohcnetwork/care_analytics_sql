@@ -1,7 +1,7 @@
 
 # Bed Availability Prediction
 
-> 7-day forward forecast of bed occupancy and vacancies per floor/ward, with bottleneck flagging
+> 24 hours forward forecast of bed occupancy and vacancies per floor/ward, with bottleneck flagging
 
 ## Purpose
 
