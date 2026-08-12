@@ -21,11 +21,11 @@ Counts patients whose most recent recorded systolic blood pressure from the spec
 WITH latest_sbp AS (
 		SELECT DISTINCT ON (emr_questionnaireresponse.patient_id)
 					 emr_questionnaireresponse.patient_id AS patient_id,
-					 NULLIF(regexp_replace(answer_element->>'value', '[^0-9.]', '', 'g'), '')::numeric AS systolic_bp
+					 (answer_element->>'value')::numeric AS systolic_bp
 		FROM emr_questionnaireresponse
 		CROSS JOIN LATERAL jsonb_array_elements(emr_questionnaireresponse.responses) AS response_element
 		CROSS JOIN LATERAL jsonb_array_elements(response_element->'values') AS answer_element
-		WHERE emr_questionnaireresponse.deleted = FALSE
+		WHERE emr_questionnaireresponse.status = 'completed'
 			AND emr_questionnaireresponse.questionnaire_id IN (115)
 			AND response_element->>'question_id' = '66464c74-fee5-4a08-9283-f811564a06fb'
 			--[[AND {{date_filter}}]]
