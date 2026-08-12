@@ -21,11 +21,11 @@ Counts patients whose most recent recorded RBS value from the specified question
 WITH latest_sbp AS (
 		SELECT DISTINCT ON (emr_questionnaireresponse.patient_id)
 					 emr_questionnaireresponse.patient_id AS patient_id,
-					 NULLIF(regexp_replace(answer_element->>'value', '[^0-9.]', '', 'g'), '')::numeric AS systolic_bp
+					(answer_element->>'value')::numeric AS systolic_bp
 		FROM emr_questionnaireresponse
 		CROSS JOIN LATERAL jsonb_array_elements(emr_questionnaireresponse.responses) AS response_element
 		CROSS JOIN LATERAL jsonb_array_elements(response_element->'values') AS answer_element
-		WHERE emr_questionnaireresponse.deleted = FALSE
+		WHERE emr_questionnaireresponse.status = 'completed'
 			AND emr_questionnaireresponse.questionnaire_id IN (115)
 			AND response_element->>'question_id' = 'b000f459-1efb-4e1b-9579-2e568f9aa510'
 			--[[AND {{date_filter}}]]
