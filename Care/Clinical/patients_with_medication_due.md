@@ -17,8 +17,7 @@ WITH latest_15_day_per_patient AS (
 				emr_medicationrequest.patient_id,
 				emr_medicationrequest.authored_on::date AS last_prescribed_on
 		FROM emr_medicationrequest
-		WHERE emr_medicationrequest.deleted = FALSE
-			AND emr_medicationrequest.status != 'entered_in_error'
+		WHERE  emr_medicationrequest.status != 'entered_in_error'
 			AND EXISTS (
 					SELECT 1
 					FROM jsonb_array_elements(emr_medicationrequest.dosage_instruction) AS dosage_element
