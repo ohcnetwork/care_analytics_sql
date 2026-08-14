@@ -110,7 +110,7 @@ FROM (
 					AND origin_id = {{location_id}}
 					AND destination_id IN (264, 270, 280, 274, 273, 275, 276, 266, 279, 36, 265, 278, 297, 238, 298, 27, 481, 17, 32, 277)
 				GROUP BY ep.id
-		) outgoing_error ON incoming.id = outgoing_error.id
+		) outgoing_error ON COALESCE(incoming.id, outgoing_normal.id) = outgoing_error.id
 
 		FULL OUTER JOIN (
 				SELECT ep.id AS id, SUM(emd.quantity) AS count
@@ -122,8 +122,7 @@ FROM (
 					AND DATE(emd.created_date) <= {{selected_date}}
 					AND eii.location_id = {{location_id}}
 				GROUP BY ep.id
-		) dispenses ON dispenses.id = incoming.id
-
+		) dispenses ON COALESCE(incoming.id, outgoing_normal.id, outgoing_error.id) = dispenses.id
 ) total
 LEFT JOIN emr_product ep ON ep.id = total.final_id
 LEFT JOIN emr_productknowledge epk ON epk.id = ep.product_knowledge_id
@@ -137,5 +136,6 @@ ORDER BY SUM(total);
 - Stock balance formula per item: `incoming - outgoing_normal - outgoing_error - dispensed`.
 - Filters to positive balance only (`WHERE total.total > 0`).
 - Both `selected_date` and `location_id` are required variables.
+- The hard coded destination id's refer to the entered in error and consumption locations, update if needed
 
 *Last updated: 2026-08-13*
