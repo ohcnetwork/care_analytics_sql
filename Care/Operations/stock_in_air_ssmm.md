@@ -5,7 +5,7 @@
 
 ## Purpose
 
-Lists stock deliveries that are currently `in_progress` ("stock in air") at SSMM, showing what product is moving, quantity, delivery/order status, movement date, origin and destination locations, and the user who created the delivery record.
+Lists stock deliveries that are currently `in_progress` ("stock in air") at SSMM, showing what product is moving, quantity, delivery/order status, delivery record created date, origin and destination locations, and the user who created the delivery record.
 
 ## Parameters
 
@@ -44,8 +44,7 @@ JOIN emr_productknowledge epk
    AND destination.deleted = FALSE
 LEFT JOIN users_user uu
 	ON uu.id = esd.created_by_id
-WHERE edo.origin_id IS NOT NULL
-  AND esd.status = 'in_progress'
+WHERE esd.status = 'in_progress'
   --[[AND {{date}}]]
 ORDER BY epk.name;
 ```
