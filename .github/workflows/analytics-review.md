@@ -109,6 +109,9 @@ steps:
       REPO: ${{ github.repository }}
       EVENT_NAME: ${{ github.event_name }}
     run: |
+      # Deliberately STRICT (-e): if PR resolution itself breaks, we want a loud failure,
+      # not a review of the wrong PR. (Contrast with the JIRA/lint steps below, which must
+      # never fail the job and therefore explicitly clear the inherited -e.)
       set -euo pipefail
       mkdir -p /tmp/gh-aw/context
       PR_NUMBER=""
@@ -161,17 +164,24 @@ steps:
   # way — an LLM with a live credential in env is one prompt-injection away from leaking it.
   #
   # Atlassian has TWO kinds of API tokens with DIFFERENT base URLs (see "Manage API tokens for
-  # your Atlassian account" in Atlassian's docs):
+  # your Atlassian account" in Atlassian's docs) — CONFIRMED empirically against this site:
   #   - unscoped tokens  → https://<site>.atlassian.net
   #   - scoped tokens    → https://api.atlassian.com/ex/jira/<cloudId>
-  # A scoped token sent to the *.atlassian.net form gets HTTP 404 — same status JIRA uses for
-  # a missing/unviewable issue, so it is silently misleading. This step therefore (a) retries
-  # via the scoped-token endpoint when it can resolve the cloudId, making either token type
-  # work with either JIRA_BASE_URL form, and (b) on hard failure writes a self-diagnosing
-  # marker. The diagnostic probe is /oauth/token/accessible-resources, which works for BOTH
-  # token types. Do NOT probe /rest/api/3/myself (granular read:issue scopes are not allowed
-  # to call it — it false-reports valid credentials as broken) and do NOT use
-  # /_edgeAuth/tenantInfo for cloudId discovery (retired endpoint).
+  # A scoped token sent to the *.atlassian.net form is IGNORED ENTIRELY: anonymous and
+  # authenticated requests return identical status codes there (verified — /rest/api/3/myself
+  # → 401 and /rest/api/3/issue/ENG-909 → 404, with and without credentials). So JIRA answers
+  # 404, the same status it uses for a missing/unviewable issue — silently misleading. This
+  # step therefore (a) auto-recovers: when the configured base is a *.atlassian.net host and
+  # the issue fetch fails, it discovers the site's cloudId via the PUBLIC, unauthenticated
+  # GET <site>/_edge/tenant_info endpoint and retries via the scoped-token endpoint, making
+  # either token type work; and (b) on hard failure writes a self-diagnosing marker.
+  # Endpoints deliberately NOT used:
+  #   - /rest/api/3/myself — granular read:issue scopes may not call it; it false-reports
+  #     valid credentials as broken.
+  #   - /oauth/token/accessible-resources with basic auth — verified to return 401 uniformly
+  #     (no auth, bogus basic, bogus bearer alike): it is OAuth-Bearer-only, so a 401 from it
+  #     says NOTHING about the API-token credentials.
+  #   - /_edgeAuth/tenantInfo — retired. /_edge/tenant_info is the live replacement.
   # ------------------------------------------------------------------------------------------
   - name: Fetch JIRA ticket context
     env:
@@ -179,10 +189,18 @@ steps:
       JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
       JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
     run: |
-      # Deliberately no `set -e`: this step must NEVER fail the job. Every failure mode
-      # degrades into a marker file that tells the agent (and the humans reading the review)
-      # exactly what was missing.
+      # This step must NEVER fail the job: every failure mode degrades into a marker file
+      # that tells the agent (and the humans reading the review) exactly what was missing.
+      #
+      # CRITICAL: GitHub Actions invokes run: scripts as `bash -e {0}`, so errexit is ALREADY
+      # ACTIVE at our first line. `set -uo pipefail` does NOT clear an inherited -e — only an
+      # explicit `set +e` does. Without it, any pipeline that legitimately exits non-zero
+      # (e.g. the ticket-ID grep below on a branch with no ENG-nnn) aborts the whole agent
+      # job. Observed exactly so in run 32017183079 (branch amjithtitus09-analytics-review-bot:
+      # grep → 1, pipefail propagated it, inherited -e killed the step before the no_ticket
+      # fallback could run). Do NOT "simplify" the `set +e` away.
       set -uo pipefail
+      set +e
       OUT=/tmp/gh-aw/context/jira-ticket.md
       mkdir -p /tmp/gh-aw/context
       no_ticket() {
@@ -191,7 +209,9 @@ steps:
         exit 0
       }
       [ -n "${AW_HEAD_REF:-}" ] || no_ticket "no pull request context, so no branch name to extract a ticket ID from"
-      KEY=$(printf '%s' "$AW_HEAD_REF" | grep -oiE 'ENG-[0-9]+' | head -1 | tr '[:lower:]' '[:upper:]')
+      # `|| true`: grep exits 1 when the branch has no ticket ID — belt and braces with the
+      # `set +e` above, so this pipeline can never take the job down again.
+      KEY=$(printf '%s' "$AW_HEAD_REF" | grep -oiE 'ENG-[0-9]+' | head -1 | tr '[:lower:]' '[:upper:]' || true)
       [ -n "$KEY" ] || no_ticket "branch '$AW_HEAD_REF' does not contain a JIRA ticket ID (repo convention: branch name = ticket, e.g. ENG-909)"
       if [ -z "${JIRA_BASE_URL:-}" ] || [ -z "${JIRA_EMAIL:-}" ] || [ -z "${JIRA_API_TOKEN:-}" ]; then
         no_ticket "ticket $KEY detected in branch name, but the JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN repo secrets are not configured"
@@ -213,43 +233,49 @@ steps:
       fetch_issue "$BASE"
       if [ "$CODE" != "200" ]; then
         ORIG_CODE=$CODE
-        # Ask Atlassian which sites this credential can reach. Works for scoped AND
-        # unscoped tokens, and each returned entry's `id` is the cloudId needed for the
-        # scoped-token endpoint — one call both diagnoses and enables auto-recovery.
-        RES_JSON=$(mktemp)
-        PROBE=$(curl -sS -o "$RES_JSON" -w '%{http_code}' --max-time 15 \
-          -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
-          "https://api.atlassian.com/oauth/token/accessible-resources") || PROBE=000
-        CLOUD_ID=""; RETRIED=""
-        if [ "$PROBE" = "200" ]; then
-          CLOUD_ID=$(python3 "$GITHUB_WORKSPACE/.github/scripts/jira_sites.py" cloud-id "$RES_JSON" "$BASE" || true)
-          if [ -n "$CLOUD_ID" ] && [ "$BASE" != "https://api.atlassian.com/ex/jira/$CLOUD_ID" ]; then
-            BASE="https://api.atlassian.com/ex/jira/$CLOUD_ID"
-            RETRIED=1
-            echo "issue fetch got HTTP $ORIG_CODE at the configured base URL ($BASE_FORM); retrying via the scoped-token endpoint"
-            fetch_issue "$BASE"
-          fi
-        fi
+        CLOUD_ID=""; RETRIED=""; TCODE=""
+        SITE_ORIGIN=$(printf '%s' "$JIRA_BASE_URL" | grep -oE '^https?://[^/]+' || true)
+        case "$SITE_ORIGIN" in
+          *.atlassian.net)
+            # Scoped tokens are ignored on *.atlassian.net hosts, so a failure here is most
+            # often just the wrong base-URL form. Discover the site's cloudId via the PUBLIC
+            # /_edge/tenant_info endpoint (no credentials → cannot be confounded by auth
+            # problems) and retry via the scoped-token endpoint.
+            TENANT_JSON=$(mktemp)
+            TCODE=$(curl -sS -o "$TENANT_JSON" -w '%{http_code}' --max-time 15 \
+              -H 'Accept: application/json' "$SITE_ORIGIN/_edge/tenant_info") || TCODE=000
+            if [ "$TCODE" = "200" ]; then
+              CLOUD_ID=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("cloudId") or "")' "$TENANT_JSON" 2>/dev/null || true)
+            fi
+            if [ -n "$CLOUD_ID" ]; then
+              BASE="https://api.atlassian.com/ex/jira/$CLOUD_ID"
+              RETRIED=1
+              echo "issue fetch got HTTP $ORIG_CODE at $SITE_ORIGIN (cloudId $CLOUD_ID via /_edge/tenant_info); retrying via the scoped-token endpoint"
+              fetch_issue "$BASE"
+            fi
+            ;;
+        esac
         if [ "$CODE" != "200" ]; then
-          # Only HTTP codes, site URLs, and cloudIds appear below — never credential values.
-          case "$PROBE" in
-            401|403)
-              DIAG="JIRA credentials rejected (accessible-resources probe returned HTTP $PROBE) — check that JIRA_EMAIL matches the account that owns JIRA_API_TOKEN, and that the token has not expired (Atlassian scoped tokens expire within 365 days)" ;;
-            200)
-              SITES=$(python3 "$GITHUB_WORKSPACE/.github/scripts/jira_sites.py" summary "$RES_JSON" || echo "unavailable")
-              if [ -n "$RETRIED" ]; then
-                DIAG="authentication works, and the scoped-token endpoint https://api.atlassian.com/ex/jira/$CLOUD_ID was tried too (HTTP $CODE there) — $KEY is likely not visible to this account or does not exist (JIRA returns 404 rather than 403 for unviewable issues). Token can reach: $SITES"
-              elif [ -n "$CLOUD_ID" ]; then
-                DIAG="authentication works and JIRA_BASE_URL is already well-formed ($BASE_FORM) — $KEY is likely not visible to this account or does not exist (JIRA returns 404 rather than 403 for unviewable issues). Token can reach: $SITES"
-              else
-                DIAG="authentication works (accessible-resources returned 200) but the configured JIRA_BASE_URL ($BASE_FORM) matches none of the token's sites. Scoped API tokens must target https://api.atlassian.com/ex/jira/<cloudId> — set JIRA_BASE_URL to exactly that (no trailing slash, no /rest suffix). Token can reach: $SITES"
-              fi ;;
-            000) DIAG="could not reach api.atlassian.com to validate the credentials (connection failed) — runner egress may be blocked" ;;
-            *) DIAG="accessible-resources probe returned unexpected HTTP $PROBE — the token may be of a type this workflow does not recognise" ;;
-          esac
-          no_ticket "JIRA returned HTTP $ORIG_CODE for $KEY at the configured base URL. Diagnosis: $DIAG."
+          # Only HTTP codes, hostnames, and cloudIds appear below — never credential values.
+          # Decisive where the evidence is decisive (the two-URL rule is proven); hedged where
+          # it genuinely cannot distinguish causes (JIRA 404s rather than 403s for unviewable
+          # issues, so "missing" vs "not visible" is indistinguishable from outside).
+          RULE="Two-URL rule (empirically confirmed): scoped API tokens authenticate ONLY against https://api.atlassian.com/ex/jira/<cloudId> — on https://<site>.atlassian.net they are ignored entirely (anonymous and authenticated requests return identical status codes). Unscoped tokens use https://<site>.atlassian.net."
+          if [ -n "$RETRIED" ]; then
+            DIAG="The scoped-token endpoint https://api.atlassian.com/ex/jira/$CLOUD_ID (cloudId auto-discovered via /_edge/tenant_info) was tried too and returned HTTP $CODE. Likely causes: the token's account lacks access to the ${KEY%%-*} project, the ticket does not exist (JIRA returns 404 rather than 403 for unviewable issues), or the token has expired (Atlassian scoped tokens expire within 365 days). $RULE"
+          elif [ -n "$TCODE" ]; then
+            DIAG="CloudId discovery via $SITE_ORIGIN/_edge/tenant_info did not yield a cloudId (HTTP $TCODE), so the scoped-endpoint retry could not be attempted. $RULE If JIRA_API_TOKEN was created with scopes, set JIRA_BASE_URL to https://api.atlassian.com/ex/jira/<cloudId> (no trailing slash, no /rest suffix) — discover the cloudId with: curl -s $SITE_ORIGIN/_edge/tenant_info. Other possibilities: the token's account lacks access to the ${KEY%%-*} project, or the ticket does not exist."
+          else
+            case "$JIRA_BASE_URL" in
+              https://api.atlassian.com/ex/jira/*)
+                DIAG="JIRA_BASE_URL is already the scoped-token form. Likely causes: the token's account lacks access to the ${KEY%%-*} project, the ticket does not exist (JIRA returns 404 rather than 403 for unviewable issues), the token has expired (scoped tokens expire within 365 days), or the token is UNSCOPED (unscoped tokens need the https://<site>.atlassian.net form instead). $RULE" ;;
+              *)
+                DIAG="The configured base URL is $BASE_FORM. $RULE Set JIRA_BASE_URL to the form matching the token type; for a scoped token, discover the cloudId with: curl -s https://<site>.atlassian.net/_edge/tenant_info. Other possibilities: the token's account lacks access to the ${KEY%%-*} project, or the ticket does not exist." ;;
+            esac
+          fi
+          no_ticket "JIRA returned HTTP $ORIG_CODE for $KEY at the configured base URL. $DIAG"
         fi
-        echo "recovered: issue fetched via the scoped-token endpoint — consider setting JIRA_BASE_URL to https://api.atlassian.com/ex/jira/$CLOUD_ID"
+        echo "recovered: issue fetched via the scoped-token endpoint — set JIRA_BASE_URL to https://api.atlassian.com/ex/jira/$CLOUD_ID to skip this retry in future runs"
       fi
       CCODE=$(curl -sS -o "$COMMENTS_JSON" -w '%{http_code}' --max-time 30 \
         -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
@@ -298,7 +324,11 @@ steps:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       REPO: ${{ github.repository }}
     run: |
+      # Never fails the job — findings are agent input, and every abort path writes a
+      # fallback marker instead. Actions injects `bash -e {0}`; clear it explicitly
+      # (see the JIRA step's comment and run 32017183079 for the failure this prevents).
       set -uo pipefail
+      set +e
       OUT=/tmp/gh-aw/context/lint-report.md
       mkdir -p /tmp/gh-aw/context
       fallback() {
