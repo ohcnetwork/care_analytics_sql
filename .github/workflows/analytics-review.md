@@ -88,7 +88,16 @@ checkout:
 # Every one of them is best-effort: a missing secret, an unreachable JIRA, or a broken file must
 # degrade into an explanatory marker the agent can read — never into a failed job.
 steps:
+  # The resolved identity is written THREE ways because each has a different consumer:
+  #   - $GITHUB_ENV        → the later pre-steps (JIRA fetch reads AW_HEAD_REF, lint reads all).
+  #   - $GITHUB_OUTPUT     → anything that later wants `steps.resolve_pr.outputs.*` in THIS job.
+  #   - run-context.md     → THE AGENT. Step env does not reach the agent's sandbox, and the
+  #     prompt is rendered in a separate activation job, so `${{ steps.* }}` interpolation into
+  #     the prompt body cannot work either. On workflow_dispatch the event payload carries no PR
+  #     object at all — dry-run 32015295640 noop'd ("no PR/issue number in context") for exactly
+  #     that reason. The context file is the one channel proven to reach the agent.
   - name: Resolve PR context (number, head ref, head SHA)
+    id: resolve_pr
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Event-derived values enter the shell via env — never interpolated with ${{ }} inside
@@ -98,6 +107,7 @@ steps:
       EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
       INPUT_PR_NUMBER: ${{ github.event.inputs.pr_number }}
       REPO: ${{ github.repository }}
+      EVENT_NAME: ${{ github.event_name }}
     run: |
       set -euo pipefail
       mkdir -p /tmp/gh-aw/context
@@ -119,6 +129,26 @@ steps:
         echo "AW_HEAD_REF=$HEAD_REF"
         echo "AW_HEAD_SHA=$HEAD_SHA"
       } >> "$GITHUB_ENV"
+      {
+        echo "pr_number=$PR_NUMBER"
+        echo "head_ref=$HEAD_REF"
+        echo "head_sha=$HEAD_SHA"
+      } >> "$GITHUB_OUTPUT"
+      # The agent's source of truth for WHICH PR it is reviewing. Head ref is
+      # author-controlled text, but git forbids whitespace/control characters in ref
+      # names, so these single-line writes cannot be broken out of.
+      {
+        echo "# Run context (resolved by a deterministic pre-step — trust this over the event payload)"
+        echo
+        echo "- Triggering event: $EVENT_NAME"
+        if [ -n "$PR_NUMBER" ]; then
+          echo "- PR under review: #$PR_NUMBER"
+          echo "- Head ref (PR branch name): $HEAD_REF"
+          echo "- Head SHA: $HEAD_SHA"
+        else
+          echo "- PR under review: NONE RESOLVED — the event payload contained no PR or issue number and no pr_number dispatch input was given. There is nothing to review."
+        fi
+      } > /tmp/gh-aw/context/run-context.md
       echo "PR=#${PR_NUMBER:-none} head=${HEAD_REF:-?}@${HEAD_SHA:-?}"
 
   # ------------------------------------------------------------------------------------------
@@ -129,6 +159,19 @@ steps:
   # The three JIRA secrets are referenced ONLY in this step's env. They are never exposed to
   # the agent: the agent reads the *rendered markdown file*, not the credentials. Keep it that
   # way — an LLM with a live credential in env is one prompt-injection away from leaking it.
+  #
+  # Atlassian has TWO kinds of API tokens with DIFFERENT base URLs (see "Manage API tokens for
+  # your Atlassian account" in Atlassian's docs):
+  #   - unscoped tokens  → https://<site>.atlassian.net
+  #   - scoped tokens    → https://api.atlassian.com/ex/jira/<cloudId>
+  # A scoped token sent to the *.atlassian.net form gets HTTP 404 — same status JIRA uses for
+  # a missing/unviewable issue, so it is silently misleading. This step therefore (a) retries
+  # via the scoped-token endpoint when it can resolve the cloudId, making either token type
+  # work with either JIRA_BASE_URL form, and (b) on hard failure writes a self-diagnosing
+  # marker. The diagnostic probe is /oauth/token/accessible-resources, which works for BOTH
+  # token types. Do NOT probe /rest/api/3/myself (granular read:issue scopes are not allowed
+  # to call it — it false-reports valid credentials as broken) and do NOT use
+  # /_edgeAuth/tenantInfo for cloudId discovery (retired endpoint).
   # ------------------------------------------------------------------------------------------
   - name: Fetch JIRA ticket context
     env:
@@ -154,14 +197,63 @@ steps:
         no_ticket "ticket $KEY detected in branch name, but the JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN repo secrets are not configured"
       fi
       JIRA_BASE_URL="${JIRA_BASE_URL%/}"
+      # Classify the configured base URL's shape for diagnostics. Hosts only — never values.
+      case "$JIRA_BASE_URL" in
+        https://api.atlassian.com/ex/jira/*) BASE_FORM="host api.atlassian.com — the scoped-token form" ;;
+        https://*.atlassian.net*) BASE_FORM="a *.atlassian.net host — works only with UNSCOPED tokens" ;;
+        *) BASE_FORM="a host that is neither api.atlassian.com nor *.atlassian.net" ;;
+      esac
       ISSUE_JSON=$(mktemp); COMMENTS_JSON=$(mktemp)
-      CODE=$(curl -sS -o "$ISSUE_JSON" -w '%{http_code}' --max-time 30 \
-        -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
-        "$JIRA_BASE_URL/rest/api/3/issue/$KEY?fields=summary,description,labels,status") || CODE=000
-      [ "$CODE" = "200" ] || no_ticket "JIRA returned HTTP $CODE for $KEY (ticket may not exist, or credentials may be wrong)"
+      fetch_issue() {
+        CODE=$(curl -sS -o "$ISSUE_JSON" -w '%{http_code}' --max-time 30 \
+          -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
+          "$1/rest/api/3/issue/$KEY?fields=summary,description,labels,status") || CODE=000
+      }
+      BASE="$JIRA_BASE_URL"
+      fetch_issue "$BASE"
+      if [ "$CODE" != "200" ]; then
+        ORIG_CODE=$CODE
+        # Ask Atlassian which sites this credential can reach. Works for scoped AND
+        # unscoped tokens, and each returned entry's `id` is the cloudId needed for the
+        # scoped-token endpoint — one call both diagnoses and enables auto-recovery.
+        RES_JSON=$(mktemp)
+        PROBE=$(curl -sS -o "$RES_JSON" -w '%{http_code}' --max-time 15 \
+          -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
+          "https://api.atlassian.com/oauth/token/accessible-resources") || PROBE=000
+        CLOUD_ID=""; RETRIED=""
+        if [ "$PROBE" = "200" ]; then
+          CLOUD_ID=$(python3 "$GITHUB_WORKSPACE/.github/scripts/jira_sites.py" cloud-id "$RES_JSON" "$BASE" || true)
+          if [ -n "$CLOUD_ID" ] && [ "$BASE" != "https://api.atlassian.com/ex/jira/$CLOUD_ID" ]; then
+            BASE="https://api.atlassian.com/ex/jira/$CLOUD_ID"
+            RETRIED=1
+            echo "issue fetch got HTTP $ORIG_CODE at the configured base URL ($BASE_FORM); retrying via the scoped-token endpoint"
+            fetch_issue "$BASE"
+          fi
+        fi
+        if [ "$CODE" != "200" ]; then
+          # Only HTTP codes, site URLs, and cloudIds appear below — never credential values.
+          case "$PROBE" in
+            401|403)
+              DIAG="JIRA credentials rejected (accessible-resources probe returned HTTP $PROBE) — check that JIRA_EMAIL matches the account that owns JIRA_API_TOKEN, and that the token has not expired (Atlassian scoped tokens expire within 365 days)" ;;
+            200)
+              SITES=$(python3 "$GITHUB_WORKSPACE/.github/scripts/jira_sites.py" summary "$RES_JSON" || echo "unavailable")
+              if [ -n "$RETRIED" ]; then
+                DIAG="authentication works, and the scoped-token endpoint https://api.atlassian.com/ex/jira/$CLOUD_ID was tried too (HTTP $CODE there) — $KEY is likely not visible to this account or does not exist (JIRA returns 404 rather than 403 for unviewable issues). Token can reach: $SITES"
+              elif [ -n "$CLOUD_ID" ]; then
+                DIAG="authentication works and JIRA_BASE_URL is already well-formed ($BASE_FORM) — $KEY is likely not visible to this account or does not exist (JIRA returns 404 rather than 403 for unviewable issues). Token can reach: $SITES"
+              else
+                DIAG="authentication works (accessible-resources returned 200) but the configured JIRA_BASE_URL ($BASE_FORM) matches none of the token's sites. Scoped API tokens must target https://api.atlassian.com/ex/jira/<cloudId> — set JIRA_BASE_URL to exactly that (no trailing slash, no /rest suffix). Token can reach: $SITES"
+              fi ;;
+            000) DIAG="could not reach api.atlassian.com to validate the credentials (connection failed) — runner egress may be blocked" ;;
+            *) DIAG="accessible-resources probe returned unexpected HTTP $PROBE — the token may be of a type this workflow does not recognise" ;;
+          esac
+          no_ticket "JIRA returned HTTP $ORIG_CODE for $KEY at the configured base URL. Diagnosis: $DIAG."
+        fi
+        echo "recovered: issue fetched via the scoped-token endpoint — consider setting JIRA_BASE_URL to https://api.atlassian.com/ex/jira/$CLOUD_ID"
+      fi
       CCODE=$(curl -sS -o "$COMMENTS_JSON" -w '%{http_code}' --max-time 30 \
         -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
-        "$JIRA_BASE_URL/rest/api/3/issue/$KEY/comment") || CCODE=000
+        "$BASE/rest/api/3/issue/$KEY/comment") || CCODE=000
       [ "$CCODE" = "200" ] || printf '{"comments":[]}' > "$COMMENTS_JSON"
       # Render the ADF (Atlassian Document Format) JSON into readable markdown, using the
       # renderer from the TRUSTED BASE checkout. Imperfect rendering is fine; a failed render
@@ -285,9 +377,14 @@ layout. To see this PR's own content — including whether a past finding was fi
 **at the head SHA via the GitHub API**. Confusing the two is what produces a false "this was
 fixed": you read the old file and saw the old code.
 
-**Your prepared context.** Deterministic pre-steps already ran and left three inputs for you.
-Read the first two **before** reviewing anything:
+**Your prepared context.** Deterministic pre-steps already ran and left four inputs for you.
+Read the first three **before** reviewing anything:
 
+- `/tmp/gh-aw/context/run-context.md` — **which PR you are reviewing**: the PR number, head ref,
+  and head SHA a pre-step resolved from the trigger. This is your source of truth for PR
+  identity. Do **not** infer the PR from the event payload: on `workflow_dispatch` the payload
+  carries no PR object at all (the PR arrives via the `pr_number` dispatch input, and only this
+  file reflects it).
 - `/tmp/gh-aw/context/jira-ticket.md` — the JIRA requirement behind this PR (branch name = ticket
   ID in this repo), or a `NO TICKET FOUND: <reason>` marker. This is what Lens 1 reviews against.
 - `/tmp/gh-aw/context/lint-report.md` — deterministic sqlglot parse results and TEMPLATE.md
@@ -313,6 +410,11 @@ Use that exact prefix every time; it is how a human finds your review among othe
 
 ## First: decide what kind of run this is
 
+Start from `/tmp/gh-aw/context/run-context.md` — it names the PR under review. If it resolves
+**no** PR number, there is genuinely nothing to review: call `noop` with that reason. If it names
+a PR, review that PR by the rules below regardless of the triggering event — a manual
+`workflow_dispatch` with a resolved PR number is a normal review, not a special case.
+
 - **No prior comments from you** → *first review*. Review the full PR diff.
 - **Prior comments exist, triggered by a push (`synchronize`) or any other PR event** (`reopened`,
   `ready_for_review`, a manual dispatch) → *re-review*. Review **only what changed since your last
@@ -329,15 +431,17 @@ what you already said, and the commit history tells you what has landed since.
   repo.
 - **Do read the repository** to check conventions and precedents — how sibling queries document the
   same table, what `TEMPLATE.md` requires, where a domain's files live.
-- **Skip entirely** (call `noop` with the reason) when: the delta since your last review is empty,
-  or the diff touches no query docs and no SQL (e.g. README-only) and there is nothing your lenses
-  apply to. (Draft PRs never reach you — they are filtered at the trigger.)
+- **Skip entirely** (call `noop` with the reason) when: the run context resolves no PR number, the
+  delta since your last review is empty, or the diff touches no query docs and no SQL (e.g.
+  README-only) and there is nothing your lenses apply to. (Draft PRs never reach you — they are
+  filtered at the trigger.)
 - If you have already posted **6 or more** review rounds on this PR, post nothing further unless a
   human @-mentions you. A reviewer that will not stop is noise, and every round costs credits.
 
 ## Reviewing
 
-1. Read `/tmp/gh-aw/context/jira-ticket.md` and `/tmp/gh-aw/context/lint-report.md`, then the skill
+1. Read `/tmp/gh-aw/context/run-context.md` (the PR under review), then
+   `/tmp/gh-aw/context/jira-ticket.md` and `/tmp/gh-aw/context/lint-report.md`, then the skill
    files under `/tmp/gh-aw/skills/care-sql-code-review/`.
 2. Fetch the PR's changed files and diff via the GitHub API. For a re-review, diff against the head
    SHA you last commented on rather than the base — you are looking for what is *new*.
