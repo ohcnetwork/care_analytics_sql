@@ -159,6 +159,19 @@ steps:
   # The three JIRA secrets are referenced ONLY in this step's env. They are never exposed to
   # the agent: the agent reads the *rendered markdown file*, not the credentials. Keep it that
   # way — an LLM with a live credential in env is one prompt-injection away from leaking it.
+  #
+  # Atlassian has TWO kinds of API tokens with DIFFERENT base URLs (see "Manage API tokens for
+  # your Atlassian account" in Atlassian's docs):
+  #   - unscoped tokens  → https://<site>.atlassian.net
+  #   - scoped tokens    → https://api.atlassian.com/ex/jira/<cloudId>
+  # A scoped token sent to the *.atlassian.net form gets HTTP 404 — same status JIRA uses for
+  # a missing/unviewable issue, so it is silently misleading. This step therefore (a) retries
+  # via the scoped-token endpoint when it can resolve the cloudId, making either token type
+  # work with either JIRA_BASE_URL form, and (b) on hard failure writes a self-diagnosing
+  # marker. The diagnostic probe is /oauth/token/accessible-resources, which works for BOTH
+  # token types. Do NOT probe /rest/api/3/myself (granular read:issue scopes are not allowed
+  # to call it — it false-reports valid credentials as broken) and do NOT use
+  # /_edgeAuth/tenantInfo for cloudId discovery (retired endpoint).
   # ------------------------------------------------------------------------------------------
   - name: Fetch JIRA ticket context
     env:
@@ -184,30 +197,63 @@ steps:
         no_ticket "ticket $KEY detected in branch name, but the JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN repo secrets are not configured"
       fi
       JIRA_BASE_URL="${JIRA_BASE_URL%/}"
+      # Classify the configured base URL's shape for diagnostics. Hosts only — never values.
+      case "$JIRA_BASE_URL" in
+        https://api.atlassian.com/ex/jira/*) BASE_FORM="host api.atlassian.com — the scoped-token form" ;;
+        https://*.atlassian.net*) BASE_FORM="a *.atlassian.net host — works only with UNSCOPED tokens" ;;
+        *) BASE_FORM="a host that is neither api.atlassian.com nor *.atlassian.net" ;;
+      esac
       ISSUE_JSON=$(mktemp); COMMENTS_JSON=$(mktemp)
-      CODE=$(curl -sS -o "$ISSUE_JSON" -w '%{http_code}' --max-time 30 \
-        -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
-        "$JIRA_BASE_URL/rest/api/3/issue/$KEY?fields=summary,description,labels,status") || CODE=000
-      if [ "$CODE" != "200" ]; then
-        # JIRA deliberately answers 404 (not 403) when the authenticating account merely
-        # lacks permission to view an issue, so a bare 404 is three-ways ambiguous: bad
-        # ticket, bad permissions, or bad credentials. Probe an auth-only endpoint to
-        # split those cases so the marker tells whoever configured the secrets exactly
-        # what to fix. Only HTTP codes are reported — never credential values.
-        AUTH_CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 \
+      fetch_issue() {
+        CODE=$(curl -sS -o "$ISSUE_JSON" -w '%{http_code}' --max-time 30 \
           -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
-          "$JIRA_BASE_URL/rest/api/3/myself") || AUTH_CODE=000
-        case "$AUTH_CODE" in
-          200) DIAG="credentials authenticate fine (auth probe /rest/api/3/myself returned 200), so either $KEY does not exist on this JIRA site or the API account lacks permission to view its project — JIRA reports both as 404" ;;
-          401|403) DIAG="the credentials themselves are rejected (auth probe /rest/api/3/myself returned HTTP $AUTH_CODE) — check the JIRA_EMAIL / JIRA_API_TOKEN pairing" ;;
-          000) DIAG="the JIRA site is unreachable (auth probe could not connect) — check JIRA_BASE_URL" ;;
-          *) DIAG="auth probe /rest/api/3/myself returned unexpected HTTP $AUTH_CODE — JIRA_BASE_URL may point at the wrong site or a non-JIRA endpoint" ;;
-        esac
-        no_ticket "JIRA returned HTTP $CODE for $KEY. Auth diagnosis: $DIAG."
+          "$1/rest/api/3/issue/$KEY?fields=summary,description,labels,status") || CODE=000
+      }
+      BASE="$JIRA_BASE_URL"
+      fetch_issue "$BASE"
+      if [ "$CODE" != "200" ]; then
+        ORIG_CODE=$CODE
+        # Ask Atlassian which sites this credential can reach. Works for scoped AND
+        # unscoped tokens, and each returned entry's `id` is the cloudId needed for the
+        # scoped-token endpoint — one call both diagnoses and enables auto-recovery.
+        RES_JSON=$(mktemp)
+        PROBE=$(curl -sS -o "$RES_JSON" -w '%{http_code}' --max-time 15 \
+          -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
+          "https://api.atlassian.com/oauth/token/accessible-resources") || PROBE=000
+        CLOUD_ID=""; RETRIED=""
+        if [ "$PROBE" = "200" ]; then
+          CLOUD_ID=$(python3 "$GITHUB_WORKSPACE/.github/scripts/jira_sites.py" cloud-id "$RES_JSON" "$BASE" || true)
+          if [ -n "$CLOUD_ID" ] && [ "$BASE" != "https://api.atlassian.com/ex/jira/$CLOUD_ID" ]; then
+            BASE="https://api.atlassian.com/ex/jira/$CLOUD_ID"
+            RETRIED=1
+            echo "issue fetch got HTTP $ORIG_CODE at the configured base URL ($BASE_FORM); retrying via the scoped-token endpoint"
+            fetch_issue "$BASE"
+          fi
+        fi
+        if [ "$CODE" != "200" ]; then
+          # Only HTTP codes, site URLs, and cloudIds appear below — never credential values.
+          case "$PROBE" in
+            401|403)
+              DIAG="JIRA credentials rejected (accessible-resources probe returned HTTP $PROBE) — check that JIRA_EMAIL matches the account that owns JIRA_API_TOKEN, and that the token has not expired (Atlassian scoped tokens expire within 365 days)" ;;
+            200)
+              SITES=$(python3 "$GITHUB_WORKSPACE/.github/scripts/jira_sites.py" summary "$RES_JSON" || echo "unavailable")
+              if [ -n "$RETRIED" ]; then
+                DIAG="authentication works, and the scoped-token endpoint https://api.atlassian.com/ex/jira/$CLOUD_ID was tried too (HTTP $CODE there) — $KEY is likely not visible to this account or does not exist (JIRA returns 404 rather than 403 for unviewable issues). Token can reach: $SITES"
+              elif [ -n "$CLOUD_ID" ]; then
+                DIAG="authentication works and JIRA_BASE_URL is already well-formed ($BASE_FORM) — $KEY is likely not visible to this account or does not exist (JIRA returns 404 rather than 403 for unviewable issues). Token can reach: $SITES"
+              else
+                DIAG="authentication works (accessible-resources returned 200) but the configured JIRA_BASE_URL ($BASE_FORM) matches none of the token's sites. Scoped API tokens must target https://api.atlassian.com/ex/jira/<cloudId> — set JIRA_BASE_URL to exactly that (no trailing slash, no /rest suffix). Token can reach: $SITES"
+              fi ;;
+            000) DIAG="could not reach api.atlassian.com to validate the credentials (connection failed) — runner egress may be blocked" ;;
+            *) DIAG="accessible-resources probe returned unexpected HTTP $PROBE — the token may be of a type this workflow does not recognise" ;;
+          esac
+          no_ticket "JIRA returned HTTP $ORIG_CODE for $KEY at the configured base URL. Diagnosis: $DIAG."
+        fi
+        echo "recovered: issue fetched via the scoped-token endpoint — consider setting JIRA_BASE_URL to https://api.atlassian.com/ex/jira/$CLOUD_ID"
       fi
       CCODE=$(curl -sS -o "$COMMENTS_JSON" -w '%{http_code}' --max-time 30 \
         -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
-        "$JIRA_BASE_URL/rest/api/3/issue/$KEY/comment") || CCODE=000
+        "$BASE/rest/api/3/issue/$KEY/comment") || CCODE=000
       [ "$CCODE" = "200" ] || printf '{"comments":[]}' > "$COMMENTS_JSON"
       # Render the ADF (Atlassian Document Format) JSON into readable markdown, using the
       # renderer from the TRUSTED BASE checkout. Imperfect rendering is fine; a failed render
