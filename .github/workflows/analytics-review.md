@@ -88,7 +88,16 @@ checkout:
 # Every one of them is best-effort: a missing secret, an unreachable JIRA, or a broken file must
 # degrade into an explanatory marker the agent can read — never into a failed job.
 steps:
+  # The resolved identity is written THREE ways because each has a different consumer:
+  #   - $GITHUB_ENV        → the later pre-steps (JIRA fetch reads AW_HEAD_REF, lint reads all).
+  #   - $GITHUB_OUTPUT     → anything that later wants `steps.resolve_pr.outputs.*` in THIS job.
+  #   - run-context.md     → THE AGENT. Step env does not reach the agent's sandbox, and the
+  #     prompt is rendered in a separate activation job, so `${{ steps.* }}` interpolation into
+  #     the prompt body cannot work either. On workflow_dispatch the event payload carries no PR
+  #     object at all — dry-run 32015295640 noop'd ("no PR/issue number in context") for exactly
+  #     that reason. The context file is the one channel proven to reach the agent.
   - name: Resolve PR context (number, head ref, head SHA)
+    id: resolve_pr
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # Event-derived values enter the shell via env — never interpolated with ${{ }} inside
@@ -98,6 +107,7 @@ steps:
       EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
       INPUT_PR_NUMBER: ${{ github.event.inputs.pr_number }}
       REPO: ${{ github.repository }}
+      EVENT_NAME: ${{ github.event_name }}
     run: |
       set -euo pipefail
       mkdir -p /tmp/gh-aw/context
@@ -119,6 +129,26 @@ steps:
         echo "AW_HEAD_REF=$HEAD_REF"
         echo "AW_HEAD_SHA=$HEAD_SHA"
       } >> "$GITHUB_ENV"
+      {
+        echo "pr_number=$PR_NUMBER"
+        echo "head_ref=$HEAD_REF"
+        echo "head_sha=$HEAD_SHA"
+      } >> "$GITHUB_OUTPUT"
+      # The agent's source of truth for WHICH PR it is reviewing. Head ref is
+      # author-controlled text, but git forbids whitespace/control characters in ref
+      # names, so these single-line writes cannot be broken out of.
+      {
+        echo "# Run context (resolved by a deterministic pre-step — trust this over the event payload)"
+        echo
+        echo "- Triggering event: $EVENT_NAME"
+        if [ -n "$PR_NUMBER" ]; then
+          echo "- PR under review: #$PR_NUMBER"
+          echo "- Head ref (PR branch name): $HEAD_REF"
+          echo "- Head SHA: $HEAD_SHA"
+        else
+          echo "- PR under review: NONE RESOLVED — the event payload contained no PR or issue number and no pr_number dispatch input was given. There is nothing to review."
+        fi
+      } > /tmp/gh-aw/context/run-context.md
       echo "PR=#${PR_NUMBER:-none} head=${HEAD_REF:-?}@${HEAD_SHA:-?}"
 
   # ------------------------------------------------------------------------------------------
@@ -158,7 +188,23 @@ steps:
       CODE=$(curl -sS -o "$ISSUE_JSON" -w '%{http_code}' --max-time 30 \
         -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
         "$JIRA_BASE_URL/rest/api/3/issue/$KEY?fields=summary,description,labels,status") || CODE=000
-      [ "$CODE" = "200" ] || no_ticket "JIRA returned HTTP $CODE for $KEY (ticket may not exist, or credentials may be wrong)"
+      if [ "$CODE" != "200" ]; then
+        # JIRA deliberately answers 404 (not 403) when the authenticating account merely
+        # lacks permission to view an issue, so a bare 404 is three-ways ambiguous: bad
+        # ticket, bad permissions, or bad credentials. Probe an auth-only endpoint to
+        # split those cases so the marker tells whoever configured the secrets exactly
+        # what to fix. Only HTTP codes are reported — never credential values.
+        AUTH_CODE=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 \
+          -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
+          "$JIRA_BASE_URL/rest/api/3/myself") || AUTH_CODE=000
+        case "$AUTH_CODE" in
+          200) DIAG="credentials authenticate fine (auth probe /rest/api/3/myself returned 200), so either $KEY does not exist on this JIRA site or the API account lacks permission to view its project — JIRA reports both as 404" ;;
+          401|403) DIAG="the credentials themselves are rejected (auth probe /rest/api/3/myself returned HTTP $AUTH_CODE) — check the JIRA_EMAIL / JIRA_API_TOKEN pairing" ;;
+          000) DIAG="the JIRA site is unreachable (auth probe could not connect) — check JIRA_BASE_URL" ;;
+          *) DIAG="auth probe /rest/api/3/myself returned unexpected HTTP $AUTH_CODE — JIRA_BASE_URL may point at the wrong site or a non-JIRA endpoint" ;;
+        esac
+        no_ticket "JIRA returned HTTP $CODE for $KEY. Auth diagnosis: $DIAG."
+      fi
       CCODE=$(curl -sS -o "$COMMENTS_JSON" -w '%{http_code}' --max-time 30 \
         -u "$JIRA_EMAIL:$JIRA_API_TOKEN" -H 'Accept: application/json' \
         "$JIRA_BASE_URL/rest/api/3/issue/$KEY/comment") || CCODE=000
@@ -285,9 +331,14 @@ layout. To see this PR's own content — including whether a past finding was fi
 **at the head SHA via the GitHub API**. Confusing the two is what produces a false "this was
 fixed": you read the old file and saw the old code.
 
-**Your prepared context.** Deterministic pre-steps already ran and left three inputs for you.
-Read the first two **before** reviewing anything:
+**Your prepared context.** Deterministic pre-steps already ran and left four inputs for you.
+Read the first three **before** reviewing anything:
 
+- `/tmp/gh-aw/context/run-context.md` — **which PR you are reviewing**: the PR number, head ref,
+  and head SHA a pre-step resolved from the trigger. This is your source of truth for PR
+  identity. Do **not** infer the PR from the event payload: on `workflow_dispatch` the payload
+  carries no PR object at all (the PR arrives via the `pr_number` dispatch input, and only this
+  file reflects it).
 - `/tmp/gh-aw/context/jira-ticket.md` — the JIRA requirement behind this PR (branch name = ticket
   ID in this repo), or a `NO TICKET FOUND: <reason>` marker. This is what Lens 1 reviews against.
 - `/tmp/gh-aw/context/lint-report.md` — deterministic sqlglot parse results and TEMPLATE.md
@@ -313,6 +364,11 @@ Use that exact prefix every time; it is how a human finds your review among othe
 
 ## First: decide what kind of run this is
 
+Start from `/tmp/gh-aw/context/run-context.md` — it names the PR under review. If it resolves
+**no** PR number, there is genuinely nothing to review: call `noop` with that reason. If it names
+a PR, review that PR by the rules below regardless of the triggering event — a manual
+`workflow_dispatch` with a resolved PR number is a normal review, not a special case.
+
 - **No prior comments from you** → *first review*. Review the full PR diff.
 - **Prior comments exist, triggered by a push (`synchronize`) or any other PR event** (`reopened`,
   `ready_for_review`, a manual dispatch) → *re-review*. Review **only what changed since your last
@@ -329,15 +385,17 @@ what you already said, and the commit history tells you what has landed since.
   repo.
 - **Do read the repository** to check conventions and precedents — how sibling queries document the
   same table, what `TEMPLATE.md` requires, where a domain's files live.
-- **Skip entirely** (call `noop` with the reason) when: the delta since your last review is empty,
-  or the diff touches no query docs and no SQL (e.g. README-only) and there is nothing your lenses
-  apply to. (Draft PRs never reach you — they are filtered at the trigger.)
+- **Skip entirely** (call `noop` with the reason) when: the run context resolves no PR number, the
+  delta since your last review is empty, or the diff touches no query docs and no SQL (e.g.
+  README-only) and there is nothing your lenses apply to. (Draft PRs never reach you — they are
+  filtered at the trigger.)
 - If you have already posted **6 or more** review rounds on this PR, post nothing further unless a
   human @-mentions you. A reviewer that will not stop is noise, and every round costs credits.
 
 ## Reviewing
 
-1. Read `/tmp/gh-aw/context/jira-ticket.md` and `/tmp/gh-aw/context/lint-report.md`, then the skill
+1. Read `/tmp/gh-aw/context/run-context.md` (the PR under review), then
+   `/tmp/gh-aw/context/jira-ticket.md` and `/tmp/gh-aw/context/lint-report.md`, then the skill
    files under `/tmp/gh-aw/skills/care-sql-code-review/`.
 2. Fetch the PR's changed files and diff via the GitHub API. For a re-review, diff against the head
    SHA you last commented on rather than the base — you are looking for what is *new*.
