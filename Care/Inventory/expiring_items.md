@@ -46,8 +46,8 @@ ORDER BY p.expiration_date, pk.name, batch;
 
 - The date window covers **the next calendar month** (from the 1st of next month up to but not including the 1st of the month after). Adjust the `INTERVAL` values to widen or shift the window.
 - `p.facility_id = 11` is hardcoded — change this to target a different facility.
-- Only products with `status = 'active'` and supply deliveries in `completed` / `in_progress` status are included.
+- Only products with `status = 'active'` and supply deliveries in `completed` status are included.
 - Batch number is extracted from the `p.batch` JSONB column via `->> 'lot_number'`.
 - Results are ordered by earliest expiry first, then stock name and batch.
 
-*Last updated: 2026-06-17*
+*Last updated: 2026-08-18*
