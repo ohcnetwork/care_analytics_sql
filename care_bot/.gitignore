@@ -1,0 +1,7 @@
+.env
+audit.jsonl
+saved_queries.json
+dashboards.json
+__pycache__/
+*.pyc
+.venv/

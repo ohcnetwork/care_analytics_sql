@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CARE Report Bot</title>
+<style>
+  :root { --brand: #0e7c66; --bg: #f4f6f5; --card: #ffffff; --ink: #1c2b27; }
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--ink); display: flex; flex-direction: column; height: 100vh; }
+  header { background: var(--brand); color: #fff; padding: 14px 20px; font-size: 17px; font-weight: 600; }
+  header small { font-weight: 400; opacity: .85; margin-left: 8px; }
+  #chat { flex: 1; overflow-y: auto; padding: 20px; max-width: 900px; width: 100%; margin: 0 auto; }
+  .msg { max-width: 78%; padding: 10px 14px; border-radius: 12px; margin-bottom: 10px; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; }
+  .user { background: var(--brand); color: #fff; margin-left: auto; border-bottom-right-radius: 3px; }
+  .bot { background: var(--card); border: 1px solid #e1e6e4; border-bottom-left-radius: 3px; }
+  .thinking { color: #7a8a85; font-style: italic; }
+  .card { background: var(--card); border: 1px solid #e1e6e4; border-radius: 12px; padding: 14px; margin: 4px 0 12px; max-width: 100%; overflow-x: auto; }
+  .card h3 { font-size: 14px; margin-bottom: 8px; color: #435650; }
+  .card .badge { font-size: 11px; background: #e8f2ef; color: var(--brand); border-radius: 8px; padding: 2px 8px; margin-left: 8px; font-weight: 500; }
+  .bignum { font-size: 42px; font-weight: 700; color: var(--brand); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid #e1e6e4; padding: 6px 9px; text-align: left; }
+  th { background: #f0f4f2; position: sticky; top: 0; }
+  .tablewrap { max-height: 380px; overflow: auto; }
+  .chartwrap { margin-bottom: 10px; overflow-x: auto; }
+  .sql-toggle { margin-top: 10px; background: none; border: 1px solid #cfd8d4; color: #435650; border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+  .sql-toggle:hover { background: #f0f4f2; }
+  .sql-box { margin-top: 8px; background: #1c2b27; color: #d8e6e1; padding: 10px 12px; border-radius: 8px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+  form { display: flex; gap: 10px; padding: 14px 20px; background: var(--card); border-top: 1px solid #e1e6e4; max-width: 900px; width: 100%; margin: 0 auto; }
+  input { flex: 1; padding: 11px 14px; border: 1px solid #cfd8d4; border-radius: 10px; font-size: 15px; outline: none; }
+  input:focus { border-color: var(--brand); }
+  button { background: var(--brand); color: #fff; border: none; border-radius: 10px; padding: 0 22px; font-size: 15px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+
+  header { display: flex; align-items: center; justify-content: space-between; }
+  .header-actions { display: flex; gap: 8px; }
+  .header-actions button { background: rgba(255,255,255,0.15); padding: 6px 14px; font-size: 13px; border-radius: 8px; }
+  .header-actions button:hover { background: rgba(255,255,255,0.25); }
+
+  .panel-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.25); display: none; z-index: 10; }
+  .panel-overlay.open { display: block; }
+  .panel { position: fixed; top: 0; right: 0; height: 100%; width: 380px; max-width: 90vw; background: var(--bg); box-shadow: -4px 0 16px rgba(0,0,0,0.15); transform: translateX(100%); transition: transform .2s ease; z-index: 11; display: flex; flex-direction: column; }
+  .panel.open { transform: translateX(0); }
+  .panel-header { background: var(--brand); color: #fff; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+  .panel-header button { background: rgba(255,255,255,0.2); padding: 4px 10px; font-size: 13px; }
+  .panel-body { flex: 1; overflow-y: auto; padding: 14px 16px; }
+  .panel-item { background: var(--card); border: 1px solid #e1e6e4; border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+  .panel-item .item-name { font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+  .panel-item .item-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .panel-item .item-actions button, .panel-item .item-actions select { background: none; border: 1px solid #cfd8d4; color: #435650; border-radius: 6px; padding: 3px 8px; font-size: 12px; cursor: pointer; }
+  .panel-empty { color: #7a8a85; font-size: 13px; font-style: italic; padding: 10px 0; }
+  .panel-new { display: flex; gap: 6px; margin-bottom: 14px; }
+  .panel-new input { padding: 7px 10px; font-size: 13px; }
+  .panel-new button { padding: 0 14px; font-size: 13px; }
+  .dash-queries { margin-top: 8px; padding-left: 10px; border-left: 2px solid #e1e6e4; }
+  .dash-queries .panel-item { padding: 8px 10px; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <div>CARE Report Bot <small>ask for any report in plain language</small></div>
+  <div class="header-actions">
+    <button type="button" id="openSaved">Saved Queries</button>
+    <button type="button" id="openDashboards">Dashboards</button>
+  </div>
+</header>
+<div class="panel-overlay" id="panelOverlay"></div>
+<div class="panel" id="savedPanel">
+  <div class="panel-header">Saved Queries <button type="button" data-close-panel>Close</button></div>
+  <div class="panel-body" id="savedPanelBody"></div>
+</div>
+<div class="panel" id="dashboardsPanel">
+  <div class="panel-header">Dashboards <button type="button" data-close-panel>Close</button></div>
+  <div class="panel-body" id="dashboardsPanelBody"></div>
+</div>
+<div id="chat">
+  <div class="msg bot">Hi! Ask me for any CARE report — for example: <b>"How many appointments were booked this month?"</b> or <b>"Gender split of registered patients"</b>. I'll ask a question or two if I need details, then show you the result right here.</div>
+</div>
+<form id="form">
+  <input id="input" placeholder="Ask for a report…" autocomplete="off" autofocus />
+  <button id="send" type="submit">Send</button>
+</form>
+
+<script>
+const chat = document.getElementById("chat");
+const form = document.getElementById("form");
+const input = document.getElementById("input");
+const send = document.getElementById("send");
+const sessionId = sessionStorage.getItem("care_bot_session") ||
+  (sessionStorage.setItem("care_bot_session", crypto.randomUUID()), sessionStorage.getItem("care_bot_session"));
+
+function addMessage(text, cls) {
+  const el = document.createElement("div");
+  el.className = "msg " + cls;
+  el.textContent = text;
+  chat.appendChild(el);
+  chat.scrollTop = chat.scrollHeight;
+  return el;
+}
+
+const CHART_COLORS = ["#0e7c66", "#3ba189", "#7fc6b4", "#f2a541", "#e0703f", "#8b5cf6", "#3b82f6", "#ef4444", "#10b981", "#f59e0b"];
+
+function seriesFromResult(result) {
+  const valueIdx = result.columns.length - 1;
+  return result.rows.map(row => ({ label: row[0] === null ? "" : String(row[0]), value: Number(row[valueIdx]) || 0 }));
+}
+
+function svgEl(tag, attrs) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, value));
+  return el;
+}
+
+function makeSvg(width, height, { fixedWidth = false } = {}) {
+  const svg = svgEl("svg", { viewBox: `0 0 ${width} ${height}`, width: fixedWidth ? width : "100%" });
+  if (fixedWidth) {
+    svg.style.width = width + "px";
+  } else {
+    svg.style.maxWidth = width + "px";
+  }
+  svg.style.display = "block";
+  svg.style.margin = "0 auto";
+  return svg;
+}
+
+function renderBarChart(series) {
+  const height = 280, padding = 36, bottomPadding = 70, minBarSlot = 56;
+  const width = Math.max(560, series.length * minBarSlot);
+  const svg = makeSvg(width, height, { fixedWidth: series.length * minBarSlot > 560 });
+  const max = Math.max(...series.map(s => s.value), 1);
+  const plotHeight = height - padding - bottomPadding;
+  const barWidth = width / series.length;
+  series.forEach((s, i) => {
+    const barHeight = Math.max((s.value / max) * plotHeight, s.value > 0 ? 3 : 0);
+    const x = i * barWidth + barWidth * 0.2;
+    const w = barWidth * 0.6;
+    const y = height - bottomPadding - barHeight;
+    svg.appendChild(svgEl("rect", { x, y, width: w, height: barHeight, fill: CHART_COLORS[i % CHART_COLORS.length], rx: 3 }));
+    const valueLabel = svgEl("text", { x: x + w / 2, y: y - 6, "text-anchor": "middle", "font-size": 11, fill: "#1c2b27" });
+    valueLabel.textContent = s.value;
+    svg.appendChild(valueLabel);
+    const labelText = s.label.length > 14 ? s.label.slice(0, 13) + "…" : s.label;
+    const label = svgEl("text", {
+      x: x + w / 2, y: height - bottomPadding + 14,
+      "text-anchor": "end", "font-size": 11, fill: "#435650",
+      transform: `rotate(-40 ${x + w / 2} ${height - bottomPadding + 14})`,
+    });
+    label.textContent = labelText;
+    svg.appendChild(label);
+  });
+  return svg;
+}
+
+function renderPieChart(series) {
+  const size = 260, cx = 120, cy = 120, r = 90;
+  const svg = makeSvg(size + 170, 240);
+  const total = series.reduce((sum, s) => sum + s.value, 0) || 1;
+  let angle = -Math.PI / 2;
+  series.forEach((s, i) => {
+    const slice = (s.value / total) * Math.PI * 2;
+    const x1 = cx + r * Math.cos(angle), y1 = cy + r * Math.sin(angle);
+    angle += slice;
+    const x2 = cx + r * Math.cos(angle), y2 = cy + r * Math.sin(angle);
+    const largeArc = slice > Math.PI ? 1 : 0;
+    svg.appendChild(svgEl("path", {
+      d: `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z`,
+      fill: CHART_COLORS[i % CHART_COLORS.length],
+    }));
+  });
+  series.forEach((s, i) => {
+    const pct = ((s.value / total) * 100).toFixed(1);
+    const ly = 20 + i * 20;
+    svg.appendChild(svgEl("rect", { x: size + 10, y: ly, width: 12, height: 12, fill: CHART_COLORS[i % CHART_COLORS.length] }));
+    const text = svgEl("text", { x: size + 28, y: ly + 10, "font-size": 12, fill: "#1c2b27" });
+    text.textContent = `${s.label} (${pct}%)`;
+    svg.appendChild(text);
+  });
+  return svg;
+}
+
+function renderLineChart(series) {
+  const width = 560, height = 260, padding = 36;
+  const svg = makeSvg(width, height);
+  const max = Math.max(...series.map(s => s.value), 1);
+  const stepX = (width - padding * 2) / Math.max(series.length - 1, 1);
+  const points = series.map((s, i) => [padding + i * stepX, height - padding - (s.value / max) * (height - padding * 2)]);
+  svg.appendChild(svgEl("path", {
+    d: points.map((p, i) => (i === 0 ? "M" : "L") + p[0] + " " + p[1]).join(" "),
+    fill: "none", stroke: CHART_COLORS[0], "stroke-width": 2,
+  }));
+  points.forEach((p, i) => {
+    svg.appendChild(svgEl("circle", { cx: p[0], cy: p[1], r: 3, fill: CHART_COLORS[0] }));
+    const label = svgEl("text", { x: p[0], y: height - padding + 16, "text-anchor": "middle", "font-size": 10, fill: "#435650" });
+    label.textContent = series[i].label.length > 10 ? series[i].label.slice(0, 9) + "…" : series[i].label;
+    svg.appendChild(label);
+  });
+  return svg;
+}
+
+function buildTable(result) {
+  const wrap = document.createElement("div");
+  wrap.className = "tablewrap";
+  const table = document.createElement("table");
+  const head = table.insertRow();
+  result.columns.forEach(col => {
+    const th = document.createElement("th");
+    th.textContent = col;
+    head.appendChild(th);
+  });
+  result.rows.forEach(row => {
+    const tr = table.insertRow();
+    row.forEach(cell => { tr.insertCell().textContent = cell === null ? "" : cell; });
+  });
+  wrap.appendChild(table);
+  return wrap;
+}
+
+function addResultCard(result) {
+  const card = document.createElement("div");
+  card.className = "card";
+  const title = document.createElement("h3");
+  title.textContent = result.title;
+  const badge = document.createElement("span");
+  badge.className = "badge";
+  badge.textContent = result.display;
+  title.appendChild(badge);
+  card.appendChild(title);
+
+  const isSingleNumber = result.rows.length === 1 && result.columns.length === 1;
+  const isChart = ["bar", "pie", "line"].includes(result.display) && result.rows.length > 0 && !isSingleNumber;
+
+  if (result.display === "number" || isSingleNumber) {
+    const num = document.createElement("div");
+    num.className = "bignum";
+    num.textContent = result.rows.length ? result.rows[0][result.columns.length - 1] : "—";
+    card.appendChild(num);
+  } else if (isChart) {
+    const series = seriesFromResult(result);
+    const chartWrap = document.createElement("div");
+    chartWrap.className = "chartwrap";
+    chartWrap.appendChild(
+      result.display === "pie" ? renderPieChart(series) :
+      result.display === "line" ? renderLineChart(series) :
+      renderBarChart(series)
+    );
+    card.appendChild(chartWrap);
+
+    const tableToggle = document.createElement("button");
+    tableToggle.type = "button";
+    tableToggle.className = "sql-toggle";
+    tableToggle.textContent = "View data table";
+    const tableEl = buildTable(result);
+    tableEl.style.display = "none";
+    tableToggle.addEventListener("click", () => {
+      const showing = tableEl.style.display !== "none";
+      tableEl.style.display = showing ? "none" : "block";
+      tableToggle.textContent = showing ? "View data table" : "Hide data table";
+    });
+    card.appendChild(tableToggle);
+    card.appendChild(tableEl);
+  } else {
+    card.appendChild(buildTable(result));
+  }
+  chat.appendChild(card);
+  chat.scrollTop = chat.scrollHeight;
+
+  if (result.sql) {
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "sql-toggle";
+    toggle.textContent = "View SQL";
+    const pre = document.createElement("pre");
+    pre.className = "sql-box";
+    pre.textContent = result.sql;
+    pre.style.display = "none";
+    toggle.addEventListener("click", () => {
+      const showing = pre.style.display !== "none";
+      pre.style.display = showing ? "none" : "block";
+      toggle.textContent = showing ? "View SQL" : "Hide SQL";
+    });
+    card.appendChild(toggle);
+
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "sql-toggle";
+    saveBtn.textContent = "Save Query";
+    saveBtn.addEventListener("click", () => saveQueryLocally(result.title, result.sql));
+    card.appendChild(saveBtn);
+
+    const metabaseBtn = document.createElement("button");
+    metabaseBtn.type = "button";
+    metabaseBtn.className = "sql-toggle";
+    metabaseBtn.textContent = "Save to Metabase";
+    metabaseBtn.addEventListener("click", () => saveQueryToMetabase(result.title, result.sql, metabaseBtn));
+    card.appendChild(metabaseBtn);
+
+    card.appendChild(pre);
+  }
+}
+
+// ---------------------------------------------------------------- saved queries & dashboards
+
+const panelOverlay = document.getElementById("panelOverlay");
+const savedPanel = document.getElementById("savedPanel");
+const dashboardsPanel = document.getElementById("dashboardsPanel");
+const savedPanelBody = document.getElementById("savedPanelBody");
+const dashboardsPanelBody = document.getElementById("dashboardsPanelBody");
+
+function openPanel(panel) {
+  panelOverlay.classList.add("open");
+  panel.classList.add("open");
+}
+function closeAllPanels() {
+  panelOverlay.classList.remove("open");
+  savedPanel.classList.remove("open");
+  dashboardsPanel.classList.remove("open");
+}
+panelOverlay.addEventListener("click", closeAllPanels);
+document.querySelectorAll("[data-close-panel]").forEach(btn => btn.addEventListener("click", closeAllPanels));
+
+async function apiJson(url, options) {
+  const response = await fetch(url, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.detail || data.error || ("Request failed: " + response.status));
+  return data;
+}
+
+async function saveQueryLocally(title, sql) {
+  const name = prompt("Name this query:", title || "Saved query");
+  if (!name) return;
+  try {
+    await apiJson("/saved", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, sql }),
+    });
+    alert("Saved.");
+    if (savedPanel.classList.contains("open")) renderSavedPanel();
+  } catch (error) {
+    alert("Could not save query: " + error.message);
+  }
+}
+
+async function saveQueryToMetabase(title, sql, button) {
+  const name = prompt("Name this Metabase question:", title || "Saved question");
+  if (!name) return;
+  button.disabled = true;
+  try {
+    const data = await apiJson("/save_to_metabase", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, sql }),
+    });
+    if (confirm("Saved to Metabase. Open it now?")) window.open(data.url, "_blank");
+  } catch (error) {
+    alert("Could not save to Metabase: " + error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function runSavedQuery(sql) {
+  try {
+    const data = await apiJson("/run_sql", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sql }),
+    });
+    closeAllPanels();
+    addResultCard(data);
+  } catch (error) {
+    alert("Could not run query: " + error.message);
+  }
+}
+
+async function deleteSavedQuery(id) {
+  if (!confirm("Delete this saved query?")) return;
+  await apiJson("/saved/" + id, { method: "DELETE" });
+  renderSavedPanel();
+  if (dashboardsPanel.classList.contains("open")) renderDashboardsPanel();
+}
+
+async function renderSavedPanel() {
+  const [saved, dashboardData] = await Promise.all([
+    apiJson("/saved"),
+    apiJson("/dashboards"),
+  ]);
+  savedPanelBody.innerHTML = "";
+  if (!saved.items.length) {
+    savedPanelBody.innerHTML = '<div class="panel-empty">No saved queries yet. Use "Save Query" on any result.</div>';
+    return;
+  }
+  saved.items.forEach(item => {
+    const el = document.createElement("div");
+    el.className = "panel-item";
+    const name = document.createElement("div");
+    name.className = "item-name";
+    name.textContent = item.name;
+    el.appendChild(name);
+
+    const actions = document.createElement("div");
+    actions.className = "item-actions";
+
+    const runBtn = document.createElement("button");
+    runBtn.textContent = "Run";
+    runBtn.addEventListener("click", () => runSavedQuery(item.sql));
+    actions.appendChild(runBtn);
+
+    if (dashboardData.items.length) {
+      const select = document.createElement("select");
+      const placeholder = document.createElement("option");
+      placeholder.textContent = "Add to dashboard…";
+      placeholder.value = "";
+      select.appendChild(placeholder);
+      dashboardData.items.forEach(dash => {
+        const opt = document.createElement("option");
+        opt.value = dash.id;
+        opt.textContent = dash.name;
+        select.appendChild(opt);
+      });
+      select.addEventListener("change", async () => {
+        if (!select.value) return;
+        await apiJson(`/dashboards/${select.value}/queries`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query_id: item.id }),
+        });
+        select.value = "";
+        alert("Added to dashboard.");
+      });
+      actions.appendChild(select);
+    }
+
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "Delete";
+    delBtn.addEventListener("click", () => deleteSavedQuery(item.id));
+    actions.appendChild(delBtn);
+
+    el.appendChild(actions);
+    savedPanelBody.appendChild(el);
+  });
+}
+
+async function createDashboard() {
+  const name = prompt("Dashboard name:");
+  if (!name) return;
+  await apiJson("/dashboards", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  renderDashboardsPanel();
+}
+
+async function deleteDashboard(id) {
+  if (!confirm("Delete this dashboard?")) return;
+  await apiJson("/dashboards/" + id, { method: "DELETE" });
+  renderDashboardsPanel();
+}
+
+async function removeQueryFromDashboard(dashId, queryId) {
+  await apiJson(`/dashboards/${dashId}/queries/${queryId}`, { method: "DELETE" });
+  renderDashboardsPanel();
+}
+
+async function renderDashboardsPanel() {
+  const [dashboardData, saved] = await Promise.all([
+    apiJson("/dashboards"),
+    apiJson("/saved"),
+  ]);
+  const queryById = Object.fromEntries(saved.items.map(item => [item.id, item]));
+
+  dashboardsPanelBody.innerHTML = "";
+  const newRow = document.createElement("div");
+  newRow.className = "panel-new";
+  const newBtn = document.createElement("button");
+  newBtn.type = "button";
+  newBtn.textContent = "+ New Dashboard";
+  newBtn.style.width = "100%";
+  newBtn.addEventListener("click", createDashboard);
+  newRow.appendChild(newBtn);
+  dashboardsPanelBody.appendChild(newRow);
+
+  if (!dashboardData.items.length) {
+    dashboardsPanelBody.innerHTML += '<div class="panel-empty">No dashboards yet.</div>';
+    return;
+  }
+
+  dashboardData.items.forEach(dash => {
+    const el = document.createElement("div");
+    el.className = "panel-item";
+    const name = document.createElement("div");
+    name.className = "item-name";
+    name.textContent = dash.name;
+    el.appendChild(name);
+
+    const actions = document.createElement("div");
+    actions.className = "item-actions";
+    const delBtn = document.createElement("button");
+    delBtn.textContent = "Delete Dashboard";
+    delBtn.addEventListener("click", () => deleteDashboard(dash.id));
+    actions.appendChild(delBtn);
+    el.appendChild(actions);
+
+    const queriesWrap = document.createElement("div");
+    queriesWrap.className = "dash-queries";
+    if (!dash.query_ids.length) {
+      queriesWrap.innerHTML = '<div class="panel-empty">No queries added yet.</div>';
+    }
+    dash.query_ids.forEach(queryId => {
+      const query = queryById[queryId];
+      const qEl = document.createElement("div");
+      qEl.className = "panel-item";
+      const qName = document.createElement("div");
+      qName.className = "item-name";
+      qName.textContent = query ? query.name : "(deleted query)";
+      qEl.appendChild(qName);
+      const qActions = document.createElement("div");
+      qActions.className = "item-actions";
+      if (query) {
+        const runBtn = document.createElement("button");
+        runBtn.textContent = "Run";
+        runBtn.addEventListener("click", () => runSavedQuery(query.sql));
+        qActions.appendChild(runBtn);
+      }
+      const removeBtn = document.createElement("button");
+      removeBtn.textContent = "Remove";
+      removeBtn.addEventListener("click", () => removeQueryFromDashboard(dash.id, queryId));
+      qActions.appendChild(removeBtn);
+      qEl.appendChild(qActions);
+      queriesWrap.appendChild(qEl);
+    });
+    el.appendChild(queriesWrap);
+    dashboardsPanelBody.appendChild(el);
+  });
+}
+
+document.getElementById("openSaved").addEventListener("click", () => { openPanel(savedPanel); renderSavedPanel(); });
+document.getElementById("openDashboards").addEventListener("click", () => { openPanel(dashboardsPanel); renderDashboardsPanel(); });
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const message = input.value.trim();
+  if (!message) return;
+  addMessage(message, "user");
+  input.value = "";
+  send.disabled = true;
+  const pending = addMessage("Working on it…", "bot thinking");
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 45000); // don't hang forever on a slow/overloaded model
+    const response = await fetch("/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, message }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    if (!response.ok) throw new Error("Server returned " + response.status);
+    const data = await response.json();
+    pending.remove();
+    (data.results || []).forEach(addResultCard);
+    if (data.reply) addMessage(data.reply, "bot");
+  } catch (error) {
+    pending.textContent = error.name === "AbortError"
+      ? "Took too long to respond (the AI model may be overloaded) — please try again."
+      : "Something went wrong — is the server running?";
+  } finally {
+    send.disabled = false;
+    input.focus();
+  }
+});
+</script>
+</body>
+</html>

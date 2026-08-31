@@ -1,0 +1,12 @@
+# Secrets — never commit
+.env
+
+# # Local VS Code workspace config (tracked deliberately — shared MCP/settings config)
+# .vscode/
+
+# # Local skill notes/docs (tracked deliberately — these ARE the repo's deliverables)
+# *SKILL*.md
+# *agent*.md
+
+# macOS
+.DS_Store

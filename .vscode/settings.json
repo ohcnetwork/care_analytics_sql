@@ -1,0 +1,5 @@
+{
+  "chat.tools.terminal.autoApprove": {
+    "/^source \\.env && curl .*metabase\\.ohc\\.network/": true
+  }
+}

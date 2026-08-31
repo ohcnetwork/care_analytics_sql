@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "metabase": {
+      "type": "sse",
+      "url": "https://metabase.ohc.network/api/metabase-mcp"
+    }
+  }
+}
