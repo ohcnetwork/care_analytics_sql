@@ -27,11 +27,11 @@ INNER JOIN users_user u
 	ON u.id = ou.user_id
 INNER JOIN emr_organization o
 	ON o.id = ou.organization_id
-   AND o.deleted = FALSE
 INNER JOIN security_rolemodel r
 	ON r.id = ou.role_id
 WHERE ou.role_id = 100
   AND ou.organization_id = 101
+  AND ou.deleted = FALSE
 ORDER BY staff_name;
 ```
 
