@@ -26,6 +26,7 @@ JOIN emr_chargeitem
 		ON emr_chargeitem.service_resource = 'service_request'
 	 AND emr_chargeitem.service_resource_id = emr_servicerequest.external_id::text
 WHERE emr_servicerequest.status != 'entered_in_error'
+  AND emr_chargeitem.status != 'entered_in_error'
 	AND emr_servicerequest.category = 'laboratory'
 ORDER BY emr_servicerequest.category, emr_servicerequest.title;
 ```
