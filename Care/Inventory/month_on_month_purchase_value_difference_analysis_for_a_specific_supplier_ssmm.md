@@ -43,7 +43,7 @@ JOIN emr_facilitylocation fl
 	ON fl.id = edo.destination_id
 WHERE esd.status = 'completed'
   AND edo.origin_id IS NULL
-  AND edo.supplier_id = '20697'
+  AND edo.supplier_id = 20697
   AND edo.status = 'completed'
   AND ep.purchase_price IS NOT NULL
   --AND ({{start_date}} IS NULL OR DATE(esd.created_date) > {{start_date}}::date)
