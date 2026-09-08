@@ -32,6 +32,8 @@ INNER JOIN security_rolemodel r
 WHERE ou.role_id = 100
   AND ou.organization_id = 101
   AND ou.deleted = FALSE
+  AND u.deleted = FALSE
+  AND r.deleted = FALSE
 ORDER BY staff_name;
 ```
 
