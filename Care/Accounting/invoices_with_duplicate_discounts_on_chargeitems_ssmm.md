@@ -4,7 +4,7 @@
 
 ## Purpose
 
-Lists invoices where any linked charge item has two or more `discount` entries in its unit price components, along with a direct link to the invoice in CARE.
+Lists invoices where any linked charge item has two or more `discount` entries in its unit price components.
 
 ## Parameters
 
@@ -19,8 +19,6 @@ Lists invoices where any linked charge item has two or more `discount` entries i
 ```sql
 SELECT DISTINCT
     i.number AS invoice_number,
-    'https://care-public.ssmmhospital.com/facility/9bef54be-70b1-4210-adb5-37a0183ee5f9/billing/invoices/'
-        || i.external_id::text AS invoice_link,
     i.created_date AS invoice_date
 FROM emr_invoice i
 WHERE i.deleted = FALSE
