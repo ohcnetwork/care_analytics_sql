@@ -22,6 +22,7 @@ SELECT DISTINCT
     i.created_date AS invoice_date
 FROM emr_invoice i
 WHERE i.deleted = FALSE
+AND i.status not in ('entered_in_error','cancelled')
   AND EXISTS (
       SELECT 1
       FROM emr_chargeitem eci
