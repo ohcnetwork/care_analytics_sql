@@ -38,7 +38,7 @@ LEFT JOIN emr_diagnosticreport
     ON emr_diagnosticreport.service_request_id = emr_servicerequest.id
 LEFT JOIN emr_observation
     ON emr_observation.diagnostic_report_id = emr_diagnosticreport.id
-LEFT JOIN emr_observationdefinition
+ JOIN emr_observationdefinition
     ON emr_observationdefinition.id = emr_observation.observation_definition_id
 WHERE emr_servicerequest.status != 'entered_in_error'
   AND emr_chargeitem.status != 'entered_in_error'
