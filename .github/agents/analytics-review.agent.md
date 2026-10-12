@@ -13,6 +13,7 @@ disable-model-invocation: true
      runtime context files this file refers to:
        /tmp/gh-aw/context/jira-ticket.md   — the JIRA requirement (or a NO TICKET FOUND marker)
        /tmp/gh-aw/context/lint-report.md   — deterministic sqlglot/template lint findings
+       /tmp/gh-aw/context/review-state.md  — pending replies, delta since last review, base drift
        /tmp/gh-aw/skills/care-sql-code-review/  — the CARE SQL review skill (pinned checkout)
 -->
 
@@ -107,7 +108,9 @@ read-only at:
 **Read both files and apply them as written.** Do not re-derive or contradict the
 skill; it encodes this team's hard-won review priorities. Follow its priority order
 (correctness → performance → maintainability → money/decimals) and use its severity
-rubric and output format for SQL findings.
+rubric and output format for SQL findings. The one exception is *Team conventions*
+below: where it and the skill disagree, it wins — it records decisions this repo's
+authors have already made.
 
 Two additions the skill can't know about at runtime:
 
@@ -143,7 +146,10 @@ Files follow `TEMPLATE.md` (in the repo root). The lint report checks that secti
   standalone; don't ask for them to be "fixed" into live clauses, and flag uncommented
   ones only if they break standalone use the doc claims.
 - **Output tables** describe the columns the query actually returns.
-- **`*Last updated: YYYY-MM-DD*`** touched when the SQL changed.
+- **`*Last updated: YYYY-MM-DD*`** touched when the SQL changed. For docs that already
+  exist on the base branch, `/tmp/gh-aw/context/review-state.md` checks this
+  deterministically — relay it when it fires (#164 changed the SQL of a June doc and kept
+  the June date).
 
 ## Lens 4 — Repo hygiene
 
@@ -164,10 +170,51 @@ _Does the file land where and how this repo expects?_
 
 ---
 
+## Team conventions (these override the skill)
+
+The skill is written for CARE deployments in general; this repo's authors have settled
+the points below for theirs. You have no memory across PRs — this section is that
+memory, so don't re-raise these PR after PR, and add to it when the team settles
+something new.
+
+- **Facility scoping depends on the deployment.** The skill reads a deployment suffix as
+  a cue to check facility scoping. Here:
+  - `_ssmm` — a single-facility database. No `_ssmm` query filters by facility (0 of 20),
+    and the author confirmed it on #158. Don't ask for a `facility_id` filter.
+  - `_pallium` — same precedent (0 of 8 queries filter by facility). Don't raise it
+    unless the ticket names a facility.
+  - `_kc` — multi-facility: facility is a Metabase parameter (`{{facility_id}}` on the
+    origin facility in `patients_referred_to_secondary_unit_for_*_kc.md`). A `_kc` query
+    with no facility handling is a fair question.
+- **`deleted` depends on whether the app can delete from the table.** CARE's delete
+  endpoints soft-delete — they set `deleted = TRUE` and leave `status` alone — and the ORM
+  then hides the row, so raw SQL has to filter it out. But only some resources have a
+  delete endpoint (checked against `care/emr/api/viewsets` on `develop`):
+  - **Deletable:** patients, users, roles, organizations and their user links
+    (`emr_organizationuser`, facility-organization users), facilities, facility locations
+    and location–encounter links (`emr_facilitylocationencounter`), devices, schedules,
+    availability and tokens, questionnaires, value sets, resource requests. A missing
+    `deleted = FALSE` on these counts rows the app hides: a real finding, rated by its
+    impact — even when the table also has a `status` (accepted on #157).
+  - **Not deletable:** charge items, invoices, accounts, encounters, service requests,
+    medication dispenses, supply deliveries and delivery orders, products and product
+    knowledge, payment reconciliations, tag configs. These are invalidated by `status`,
+    which is the filter that matters. A missing `deleted = FALSE` on them is **Low**: at
+    most one line in the summary, never an inline finding, and settled once the author
+    declines it (as on #158 and #159).
+
+  For a table in neither list, check whether its viewset includes `EMRModelViewSet` or
+  `EMRDestroyMixin` before raising it.
+- **Settled stays settled.** Once an author declines a convention-level suggestion with
+  a reason, don't raise it again in a later round of the same PR.
+
+---
+
 ## Proportionality, restated
 
 A fine PR gets a clean pass — a short summary saying the query answers its ticket,
-the numbers look trustworthy, and the doc is accurate. That outcome is a success, not
+the numbers look trustworthy, and the doc is accurate — and, when it clears the bar in
+the workflow's *Approving* section, your approval. That outcome is a success, not
 a failure to find something. Prioritize ruthlessly when you do have findings:
 correctness of numbers, then requirement fidelity, then documentation accuracy, then
 hygiene. Four real findings beat eight padded ones.
