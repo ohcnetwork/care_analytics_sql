@@ -46,7 +46,7 @@ SELECT
     pi.value AS ssmm_id,
     p.name AS patient_name,
     e.encounter_class,
-    a.total_balance,
+    ROUND(a.total_balance)::integer AS rounded_amount_due,
     a.billing_status,
     a.status,
     ata.account_tags,
@@ -66,7 +66,7 @@ LEFT JOIN patient_tag_agg pta
 WHERE 1=1
   --[[AND e.encounter_class = {{encounter_class}}]]
   --[[AND pi.value = {{ssmm_id}}]]
-ORDER BY total_balance DESC;
+ORDER BY rounded_amount_due DESC;
 ```
 
 ## Notes
