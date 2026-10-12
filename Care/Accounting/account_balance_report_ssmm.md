@@ -1,11 +1,11 @@
 
 # Account Balance Report - SSMM
 
-> Per-account outstanding balance with patient, encounter, and tags
+> Displays the due amount the patient has to pay along with their encounter, patient tags and account tag details
 
 ## Purpose
 
-Returns the current balance for each patient account at SSMM along with the SSMM patient ID, patient name, primary encounter class, billing/account status, and aggregated tag labels for both the account and the patient.
+Returns the current balance for each patient account that they need to pay at SSMM along with the SSMM patient ID, patient name, primary encounter class, billing/account status, and aggregated tag labels for both the account and the patient.
 
 
 ## Parameters
@@ -63,7 +63,8 @@ LEFT JOIN account_tag_agg ata
   ON a.id = ata.account_id
 LEFT JOIN patient_tag_agg pta
   ON p.id = pta.patient_id
-WHERE 1=1
+WHERE a.total_balance > 0
+  AND a.status != 'entered_in_error'
   --[[AND e.encounter_class = {{encounter_class}}]]
   --[[AND pi.value = {{ssmm_id}}]]
 ORDER BY rounded_amount_due DESC;
@@ -73,6 +74,6 @@ ORDER BY rounded_amount_due DESC;
 
 - `pi.config_id = 21` is hardcoded for the SSMM patient identifier configuration — update if the config id changes.
 - The join on `emr_encounter` uses `a.primary_encounter_id`, so the report only includes accounts that have a primary encounter set. 
-- Results are ordered by `total_balance` descending so the largest outstanding balances appear first.
+- Results are ordered by `rounded_amount_due` descending so the largest outstanding balances appear first.
 
 *Last updated: 2026-06-19*
