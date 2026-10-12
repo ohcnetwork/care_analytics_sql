@@ -84,10 +84,13 @@ checkout:
   # pull_request_review_comment that ref is refs/pull/<n>/merge — the PR already merged into the
   # base. Observed: reply run 34191567728 (#157) checked out "Merge 76adac91 into a67e79a", so on
   # every reply run the tree this file calls "the base" contained the PR, and the pre-step scripts
-  # below ran from the PR's merge commit. issue_comment and workflow_dispatch payloads carry no
-  # pull_request, so this expression is empty there and checkout falls back to the event's ref —
-  # already the default branch for both. (gh-aw's pwn-request check accepts this expression and
-  # warns on others, e.g. github.event.repository.default_branch.)
+  # below ran from the PR's merge commit. Payloads without a pull_request leave this empty, and
+  # checkout then uses the event's ref: for issue_comment that is the default branch; for
+  # workflow_dispatch it is whichever branch the run was started from. The latter is deliberate —
+  # starting a dispatch needs write access, the workflow definition itself comes from that branch,
+  # and dispatching from a branch is how a workflow change gets tested before merge. (gh-aw's
+  # pwn-request check accepts only this exact expression, base.sha, or no ref; a `||` fallback
+  # trips its warning.)
   ref: ${{ github.event.pull_request.base.ref }}
 # Deterministic pre-steps. These run in the agent job AFTER the base checkout and BEFORE the agent
 # starts, and they prepare the four context inputs the prompt below relies on:
@@ -443,7 +446,8 @@ behavior*, and *outputs*.
 ## Ground rules
 
 **Which tree is which.** The checked-out working tree is the **base branch — it does not contain
-this PR's changes**, whatever event triggered you (the checkout is pinned to the base branch).
+this PR's changes**, whatever event triggered you (the checkout is pinned to the base branch; a
+manual dispatch uses the branch it was started from).
 Read it for what already exists: `TEMPLATE.md`, sibling query docs, the folder layout. To see this
 PR's own content — including whether a past finding was fixed — fetch the file
 **at the head SHA via the GitHub API**. Confusing the two is what produces a false "this was
@@ -458,7 +462,7 @@ Read the first four **before** doing anything:
   carries no PR object at all (the PR arrives via the `pr_number` dispatch input, and only this
   file reflects it).
 - `/tmp/gh-aw/context/review-state.md` — **what this run owes the PR**, computed from the API:
-  messages awaiting your answer, the commits since your last consolidated review (with every
+  messages awaiting your answer, what changed since your last consolidated review (with every
   removed line listed), and drift against the base branch (stale branch, merge conflicts,
   `*Last updated:*` not bumped). This — not the triggering event — decides what you do; see
   *First: reconcile*.
@@ -496,13 +500,11 @@ to do from `review-state.md`, not from the event:
 1. If `run-context.md` resolves **no** PR number, there is nothing to review: `noop` with that
    reason.
 2. **Answer every message in section 1** of `review-state.md` — see *Answering humans*.
-3. **Review according to section 2:**
-   - no consolidated review from you yet → *first review* of the full PR diff;
-   - new commits since your last review → *re-review* of that delta, plus a re-check of your own
-     open findings — whatever the trigger, a reply-triggered run included;
-   - no new commits → no review and no summary.
+3. **Review as section 2 says:** a *first review* of the full PR diff; a *re-review* of the delta
+   it shows, plus a re-check of your own open findings — whatever the trigger, a reply-triggered
+   run included; or no review and no summary.
 4. Fold section 3 (stale branch, merge conflicts, `*Last updated:*`) into whichever review you post.
-5. Nothing in section 1 and no new commits → `noop`.
+5. Nothing in section 1 and section 2 says no review → `noop`.
 
 A manual `workflow_dispatch` with a resolved PR number is a normal run under these rules. The round
 cap and the draft/closed-PR rule in *Scope* still apply.
@@ -522,8 +524,8 @@ what you already said, and the commit history tells you what has landed since.
 - **Do read the repository** to check conventions and precedents — how sibling queries document the
   same table, what `TEMPLATE.md` requires, where a domain's files live.
 - **Skip entirely** (call `noop` with the reason) when: the run context resolves no PR number,
-  `review-state.md` shows no messages awaiting you and no new commits, or the diff touches no query
-  docs and no SQL (e.g. README-only) and there is nothing your lenses apply to.
+  `review-state.md` shows no messages awaiting you and section 2 says no review, or the diff
+  touches no query docs and no SQL (e.g. README-only) and there is nothing your lenses apply to.
 - **Drafts and closed PRs.** Pushes to a draft never reach you (filtered at the trigger), but a
   comment in a draft's or a closed PR's conversation does. On either — `review-state.md` says
   which — answer what was asked and don't review.
@@ -593,13 +595,14 @@ noise. If one issue spans several places, raise it once and reference the rest.
 
 Answer **every** message in section 1 of `review-state.md`, not only the one that triggered you —
 the runs that would have answered the others may have been cancelled. Respond only to a **human**,
-and only when they **@-mention you** or **reply to one of your threads**. (Bot comments are filtered
-at the trigger and never listed; if you encounter one anyway, ignore it — two bots answering each
-other loop until the credits run out.)
+and only when they **@-mention you** (as `@github-actions`) or **reply to one of your threads**.
+(Bot comments are filtered at the trigger and never listed; if you encounter one anyway, ignore it
+— two bots answering each other loop until the credits run out.)
 
-- **Match the channel to where they spoke:** in one of your review threads → answer there with
-  `reply-to-pull-request-review-comment` (section 1 gives the comment_id); @-mention in the main
-  conversation → `add-comment` (you get one, so answer every mention in it).
+- **Match the channel to where they spoke:** in a review thread → answer there with
+  `reply-to-pull-request-review-comment` (section 1 gives the comment_id) — and if it is someone
+  else's thread, never resolve it; @-mention in the main conversation → `add-comment` (you get one,
+  so answer every mention in it).
 - **A claimed fix** ("done", "fixed", "updated") → verify it at the head SHA and say what you
   confirmed or what is still missing. **Pushback** → engage with the reason given. A bare
   acknowledgement ("ok", "will update", "thanks") needs no reply.
@@ -607,7 +610,7 @@ other loop until the credits run out.)
   call — being corrected gracefully is more useful than being right. A thread the author already
   resolved still gets your answer; resolving it again is a harmless no-op.
 - Answer only what was asked, from what the query and ticket actually say. Answering is not an
-  excuse to re-review the PR: you re-review only when section 2 shows new commits.
+  excuse to re-review the PR: you re-review only when section 2 says so.
 
 ## Tone
 

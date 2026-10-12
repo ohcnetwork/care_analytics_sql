@@ -12,12 +12,14 @@ were never answered and the push was never re-reviewed.
 Everything here comes from the GitHub API, never from the working tree:
 
   1. Messages awaiting an answer: human replies in the bot's own review
-     threads posted after the bot last spoke in that thread, and @-mentions in
-     the PR conversation since the bot's last activity.
-  2. The delta since the bot's last consolidated review: commits, patch, and
-     every REMOVED line listed on its own. (PR #157: a re-review described a
-     commit that also dropped `o.deleted = FALSE` as "the only change is adding
-     `ou.deleted = FALSE`".)
+     threads posted after the bot last spoke in that thread, and
+     @github-actions mentions -- in other review threads, or in the PR
+     conversation since the bot last commented there.
+  2. What changed in the PR's files since the bot's last consolidated review,
+     diffed version against version (so a force-push is caught even when it
+     moves the head backwards), with every REMOVED line listed on its own.
+     (PR #157: a re-review described a commit that also dropped
+     `o.deleted = FALSE` as "the only change is adding `ou.deleted = FALSE`".)
   3. Drift against the base branch: files the PR shows as added that already
      exist on the base (PR #164 reused an already-merged branch, so the API
      diff showed a 79-line file as brand new), the real diff against the base,
@@ -51,8 +53,9 @@ import urllib.parse
 # review that does.
 MARKER = "workflow_id: analytics-review"
 BOT_LOGINS = {"github-actions[bot]", "github-actions"}  # REST vs GraphQL spelling
+# How a human summons the bot: it posts as github-actions[bot].
+BOT_MENTION_RE = re.compile(r"(?<![\w.`])@github-actions(?:\[bot\])?(?![\w-])", re.IGNORECASE)
 QUERY_DOC_RE = re.compile(r"^(Care|Internal).*\.md$")  # same scope as the lint step
-MENTION_RE = re.compile(r"(?<![\w.`])@[A-Za-z0-9][A-Za-z0-9-]*")
 LAST_UPDATED_RE = re.compile(r"^\*Last updated: (\d{4}-\d{2}-\d{2})\*\s*$", re.MULTILINE)
 FENCE_RE = re.compile(r"^\s*`{3,}\s*(\S*)\s*$")
 
@@ -199,15 +202,17 @@ def sql_blocks(doc: str) -> list[str]:
     return blocks
 
 
-def removed_lines(patch: str) -> list[tuple[int, str]]:
-    """(old line number, text) for every non-blank line a unified-diff patch removes."""
+def removed_lines(diff: list[str]) -> list[tuple[int, str]]:
+    """(old line number, text) for every non-blank line a unified diff removes."""
     out: list[tuple[int, str]] = []
-    old = 0
-    for line in patch.splitlines():
+    old, in_hunk = 0, False
+    for line in diff:
         hunk = re.match(r"^@@ -(\d+)", line)
         if hunk:
-            old = int(hunk.group(1))
+            old, in_hunk = int(hunk.group(1)), True
             continue
+        if not in_hunk:
+            continue  # the ---/+++ file headers
         if line.startswith("-"):
             if line[1:].strip():
                 out.append((old, line[1:]))
@@ -217,7 +222,66 @@ def removed_lines(patch: str) -> list[tuple[int, str]]:
     return out
 
 
-def drift(repo: str, number: int, head_sha: str, base_ref: str,
+def delta(repo: str, reviewed_sha: str, head_sha: str, paths: list[str],
+          override: bool) -> tuple[list[str], int]:
+    """Section 2 for a PR you reviewed before: what changed in its files since then."""
+    cmp = get_json(f"repos/{repo}/compare/{reviewed_sha}...{head_sha}")
+    commits = cmp.get("commits") or []
+    changed: list[tuple[str, list[str]]] = []
+    unreadable: list[str] = []
+    # Version against version, file by file. Unlike the compare API's patch, this never
+    # drops a large file, and it stays right when a force-push moved the head backwards
+    # (compare then reports "behind" with no commits and no files).
+    for path in paths:
+        try:
+            old, new = file_at(repo, path, reviewed_sha), file_at(repo, path, head_sha)
+        except ApiError as e:
+            unreadable.append(f"- `{path}`: {e}")
+            continue
+        if old != new:
+            changed.append((path, list(difflib.unified_diff(
+                (old or "").splitlines(), (new or "").splitlines(),
+                f"reviewed:{path}", f"head:{path}", n=2, lineterm=""))))
+
+    span = (f"`{short(reviewed_sha)}`{' (--since-sha override)' if override else ''} → "
+            f"`{short(head_sha)}`")
+    if not changed and not unreadable:
+        merged = f" ({len(commits)} commit(s), none touching them)" if commits else ""
+        return [f"{span}: none of this PR's files changed since your last review{merged} → "
+                "**do not re-review**."], 0
+
+    out = [f"{span}: {len(changed) + len(unreadable)} file(s) changed → "
+           "**re-review this delta**:", ""]
+    if cmp.get("status") in ("behind", "diverged"):
+        out += ["**History was rewritten (force-push).** The head no longer descends from the "
+                "commit you reviewed, so commits you reviewed may be gone. Re-check that every "
+                "fix you confirmed is still there.", ""]
+    out += ([f"- `{short(c.get('sha'))}` {first_line((c.get('commit') or {}).get('message'))}"
+             for c in commits] or ["- (no new commits: the head moved back to an earlier commit)"])
+
+    removed = [f"{path}:{n}: {text.strip()}" for path, diff in changed
+               for n, text in removed_lines(diff)]
+    out += ["", "### Lines removed since your last review", "",
+            "Read these before the additions: a removed filter, join condition or status "
+            "exclusion is a regression even when nobody mentions it. (`path:line` is the line "
+            "in the version you reviewed.)", ""]
+    if removed:
+        out.append(fence("\n".join(removed)))
+    elif unreadable:
+        out.append("None in the files that could be fetched.")
+    else:
+        out.append("None — this delta removes nothing.")
+    if unreadable:
+        out += ["", "Could not fetch these, so any lines they remove are **not** listed above — "
+                "compare both versions yourself:", *unreadable]
+    out += ["", "### Diff", ""]
+    for path, diff in changed:
+        out += [f"#### `{path}`", "",
+                fence("\n".join(capped(diff, MAX_PATCH_LINES, "both versions")), "diff"), ""]
+    return out, len(changed) + len(unreadable)
+
+
+def drift(repo: str, files: list[dict], head_sha: str, base_ref: str,
           mergeable: bool | None) -> tuple[list[str], int, int]:
     """Section 3: stale files, merge conflicts, and `*Last updated:*` misses vs the base."""
     notes: list[str] = []
@@ -230,7 +294,7 @@ def drift(repo: str, number: int, head_sha: str, base_ref: str,
             "in section 1 on the next run.",
             "",
         ]
-    for f in get_list(f"repos/{repo}/pulls/{number}/files"):
+    for f in files:
         path, status = f["filename"], f.get("status")
         if status == "removed" or not (status == "added" or QUERY_DOC_RE.match(path)):
             continue
@@ -301,29 +365,31 @@ def build_report(repo: str, number: int, head_sha: str, since_sha: str | None) -
     threads = review_threads(repo, number)
     issue_comments = get_list(f"repos/{repo}/issues/{number}/comments")
 
-    activity = [r.get("submitted_at") or "" for r in consolidated]
-    for t in threads:
-        activity += [c["createdAt"] for c in t["comments"]["nodes"] if is_mine(c)]
-    activity += [
-        c["created_at"] for c in issue_comments
-        if (c.get("user") or {}).get("login") in BOT_LOGINS and MARKER in (c.get("body") or "")
-    ]
-    last_activity = max(activity, default="")
-
-    pending = []
+    pending = []  # (thread, its first comment, human comments awaiting you, thread is yours)
     for t in threads:
         comments = t["comments"]["nodes"]
-        if not comments or not is_mine(comments[0]):
-            continue  # not a thread you started
-        last_mine = max(i for i, c in enumerate(comments) if is_mine(c))
-        waiting = [c for c in comments[last_mine + 1:] if is_human(c)]
+        if not comments:
+            continue
+        spoke = [i for i, c in enumerate(comments) if is_mine(c)]
+        since_you = comments[spoke[-1] + 1:] if spoke else comments
+        yours = is_mine(comments[0])
+        waiting = [c for c in since_you if is_human(c)
+                   and (yours or BOT_MENTION_RE.search(c.get("body") or ""))]
         if waiting:
-            pending.append((t, comments[0], waiting))
+            pending.append((t, comments[0], waiting, yours))
+    # Only a conversation comment answers a conversation mention, so the watermark is your
+    # last conversation comment -- not a thread reply or a review, which a cancelled run can
+    # post without ever reaching its add-comment.
+    answered_until = max(
+        (c["created_at"] for c in issue_comments
+         if (c.get("user") or {}).get("login") in BOT_LOGINS and MARKER in (c.get("body") or "")),
+        default="",
+    )
     mentions = [
         c for c in issue_comments
         if (c.get("user") or {}).get("type") == "User"
-        and (c.get("created_at") or "") > last_activity
-        and MENTION_RE.search(c.get("body") or "")
+        and (c.get("created_at") or "") > answered_until
+        and BOT_MENTION_RE.search(c.get("body") or "")
     ][-MAX_MENTIONS:]
 
     out: list[str] = [
@@ -354,77 +420,49 @@ def build_report(repo: str, number: int, head_sha: str, since_sha: str | None) -
     out += ["", "## 1. Messages awaiting your answer", ""]
     if not pending and not mentions:
         out.append("None.")
-    for t, root, waiting in pending:
+    for t, root, waiting, yours in pending:
         line = t.get("line") or t.get("originalLine")
         where = f"`{t.get('path')}` line {line}" + (" (outdated)" if t.get("isOutdated") else "")
         state = (f"resolved by @{(t.get('resolvedBy') or {}).get('login', '?')}"
                  if t.get("isResolved") else "open")
-        out += [
-            f"### Reply in your thread on {where} — {state}",
-            "",
-            f"- Your finding: \"{first_line(root.get('body'))}\"",
-            f"- Answer with `reply-to-pull-request-review-comment`, comment_id "
-            f"`{waiting[-1]['databaseId']}`; the thread id (for resolving) is `{t['id']}`.",
-            "",
-        ]
+        reply = (f"- Answer with `reply-to-pull-request-review-comment`, comment_id "
+                 f"`{waiting[-1]['databaseId']}`")
+        if yours:
+            out += [f"### Reply in your thread on {where} — {state}", "",
+                    f"- Your finding: \"{first_line(root.get('body'))}\"",
+                    f"{reply}; the thread id (for resolving) is `{t['id']}`.", ""]
+        else:
+            starter = (root.get("author") or {}).get("login", "?")
+            out += [f"### @-mention in @{starter}'s thread on {where} — {state}", "",
+                    f"- The thread opens with: \"{first_line(root.get('body'))}\"",
+                    f"{reply}. It isn't your thread: never resolve it.", ""]
         for c in waiting:
             out += [f"**@{(c.get('author') or {}).get('login', '?')}** · {c.get('createdAt')}",
                     "", fence(clip(c.get("body"))), ""]
     if mentions:
-        out += ["### @-mentions in the PR conversation since your last activity", "",
-                "Answer those addressed to you with one `add-comment`; ignore the rest.", ""]
+        out += ["### @-mentions in the PR conversation since you last commented there", "",
+                "Answer them with one `add-comment`.", ""]
         for c in mentions:
             out += [f"**@{(c.get('user') or {}).get('login', '?')}** · {c.get('created_at')}",
                     "", fence(clip(c.get("body"))), ""]
 
-    # 2. Delta since the last consolidated review ------------------------------
-    out += ["", "## 2. Commits since your last review", ""]
+    # 2. Changes since the last consolidated review -----------------------------
+    out += ["", "## 2. Changes since your last review", ""]
     reviewed_sha = since_sha or (last_review or {}).get("commit_id")
-    delta_commits = 0
+    files = get_list(f"repos/{repo}/pulls/{number}/files") if is_open else []
+    delta_files = 0
     if not is_open:
         out.append(f"The PR is {state_label.strip('*')} → **no review**; only answer section 1.")
     elif not reviewed_sha:
         out.append("No consolidated review from you yet → **first review**: review the full PR "
                    "diff (but if section 3 reports a stale branch, review the real change it shows).")
     elif reviewed_sha == head_sha:
-        out.append(f"No new commits since your last review (`{short(reviewed_sha)}`) → "
+        out.append(f"No changes since your last review (`{short(reviewed_sha)}`) → "
                    "**do not re-review**.")
     else:
-        cmp = get_json(f"repos/{repo}/compare/{reviewed_sha}...{head_sha}")
-        commits = cmp.get("commits") or []
-        delta_commits = len(commits)
-        label = " (--since-sha override)" if since_sha else ""
-        out.append(f"{len(commits)} new commit(s), `{short(reviewed_sha)}`{label} → "
-                   f"`{short(head_sha)}` → **re-review this delta**:")
-        out.append("")
-        for c in commits:
-            out.append(f"- `{short(c.get('sha'))}` {first_line((c.get('commit') or {}).get('message'))}")
-        if cmp.get("status") == "diverged":
-            out += ["", "History was rewritten since your last review (force-push), so this delta "
-                        "is taken from the merge-base of the two commits and may repeat changes "
-                        "you already reviewed."]
-        files = cmp.get("files") or []
-        removed = [(f["filename"], n, text) for f in files
-                   for n, text in removed_lines(f.get("patch") or "")]
-        out += ["", "### Lines removed since your last review", "",
-                "Read these before the additions: a removed filter, join condition or status "
-                "exclusion is a regression even when nobody mentions it.", ""]
-        if removed:
-            out += [f"- `{path}` (was line {n}): `{text.strip()}`" for path, n, text in removed]
-        else:
-            out.append("None — this delta removes nothing.")
-        out += ["", "### Patch", ""]
-        for f in files:
-            out.append(f"#### `{f['filename']}` ({f.get('status')}, "
-                       f"+{f.get('additions', 0)} −{f.get('deletions', 0)})")
-            out.append("")
-            patch = f.get("patch")
-            if patch:
-                body = "\n".join(capped(patch.splitlines(), MAX_PATCH_LINES, "the file"))
-                out.append(fence(body, "diff"))
-            else:
-                out.append("(no patch from the API — binary, renamed only, or too large)")
-            out.append("")
+        lines, delta_files = delta(repo, reviewed_sha, head_sha,
+                                   [f["filename"] for f in files], since_sha is not None)
+        out += lines
 
     # 3. Drift against the base branch -----------------------------------------
     out += ["", f"## 3. Drift against `{base_ref}`", ""]
@@ -435,14 +473,14 @@ def build_report(repo: str, number: int, head_sha: str, since_sha: str | None) -
                    "not reviews.")
     else:
         try:
-            notes, stale, not_bumped = drift(repo, number, head_sha, base_ref, mergeable)
+            notes, stale, not_bumped = drift(repo, files, head_sha, base_ref, mergeable)
             out += notes or ["Nothing to report."]
         except ApiError as e:
             out.append(f"(Could not compute this section: {e}. Check the base branch yourself.)")
 
-    summary = (f"{sum(len(w) for _, _, w in pending)} thread repl(ies) and {len(mentions)} "
-               f"mention(s) awaiting an answer; {delta_commits} commit(s) since the last review; "
-               f"{stale} stale file(s); {not_bumped} Last-updated miss(es); "
+    summary = (f"{sum(len(waiting) for _, _, waiting, _ in pending)} thread message(s) and {len(mentions)} "
+               f"conversation mention(s) awaiting an answer; {delta_files} file(s) changed since "
+               f"the last review; {stale} stale file(s); {not_bumped} Last-updated miss(es); "
                f"conflicts: {conflict if is_open else 'n/a (' + state_label.strip('*') + ')'}")
     return "\n".join(out).rstrip() + "\n", summary
 
