@@ -205,7 +205,8 @@ something new.
 ## Proportionality, restated
 
 A fine PR gets a clean pass — a short summary saying the query answers its ticket,
-the numbers look trustworthy, and the doc is accurate. That outcome is a success, not
+the numbers look trustworthy, and the doc is accurate — and, when it clears the bar in
+the workflow's *Approving* section, your approval. That outcome is a success, not
 a failure to find something. Prioritize ruthlessly when you do have findings:
 correctness of numbers, then requirement fidelity, then documentation accuracy, then
 hygiene. Four real findings beat eight padded ones.

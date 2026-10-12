@@ -25,6 +25,8 @@ Everything here comes from the GitHub API, never from the working tree:
      diff showed a 79-line file as brand new), the real diff against the base,
      merge conflicts, and query docs whose SQL differs from the base while
      `*Last updated:*` does not.
+  4. The bot's findings so far (every thread it started, and who resolved it)
+     and whether its approval stands -- inputs to its approval bar.
 
 It is a reporter, not a gate. Comment bodies and file contents are untrusted
 PR data: they are quoted inside fences, never executed.
@@ -411,6 +413,17 @@ def build_report(repo: str, number: int, head_sha: str, since_sha: str | None) -
         )
     else:
         out.append("- Your consolidated reviews so far: 0")
+    # A push dismisses approvals (branch protection), so a standing one is normally on the head.
+    approvals = [r for r in consolidated if r.get("state") in ("APPROVED", "DISMISSED")]
+    standing = [r for r in approvals if r.get("state") == "APPROVED"]
+    if standing:
+        on = standing[-1].get("commit_id")
+        where = ("covers the current head" if on == head_sha
+                 else f"on `{short(on)}` — not the current head")
+        approval = f"**standing** ({where})"
+    else:
+        approval = "dismissed by a later push" if approvals else "none"
+    out.append(f"- Your approval: {approval}")
     mergeable = pr.get("mergeable")
     conflict = {True: "no", False: "**yes**", None: "unknown (GitHub has not computed it yet)"}[mergeable]
     if is_open:
@@ -478,10 +491,31 @@ def build_report(repo: str, number: int, head_sha: str, since_sha: str | None) -
         except ApiError as e:
             out.append(f"(Could not compute this section: {e}. Check the base branch yourself.)")
 
+    # 4. Your findings so far ----------------------------------------------------
+    out += ["", "## 4. Your findings on this PR", ""]
+    started = [t for t in threads
+               if t["comments"]["nodes"] and is_mine(t["comments"]["nodes"][0])]
+    if not started:
+        out.append("None.")
+    else:
+        out += ["Every thread you started. Resolved isn't verified: a thread someone else resolved "
+                "counts as closed for *Approving* only once you've checked the fix or agreed it "
+                "doesn't apply.", ""]
+        for t in started:
+            by = (t.get("resolvedBy") or {}).get("login")
+            state = ("**open**" if not t.get("isResolved")
+                     else "resolved by you" if by in BOT_LOGINS else f"resolved by @{by or '?'}")
+            line = t.get("line") or t.get("originalLine")
+            out.append(f"- {state} · `{t.get('path')}` line {line}"
+                       f"{' (outdated)' if t.get('isOutdated') else ''} · "
+                       f"\"{first_line(t['comments']['nodes'][0].get('body'))}\"")
+    open_findings = sum(1 for t in started if not t.get("isResolved"))
+
     summary = (f"{sum(len(waiting) for _, _, waiting, _ in pending)} thread message(s) and {len(mentions)} "
                f"conversation mention(s) awaiting an answer; {delta_files} file(s) changed since "
                f"the last review; {stale} stale file(s); {not_bumped} Last-updated miss(es); "
-               f"conflicts: {conflict if is_open else 'n/a (' + state_label.strip('*') + ')'}")
+               f"conflicts: {conflict if is_open else 'n/a (' + state_label.strip('*') + ')'}; "
+               f"{open_findings} unresolved finding(s); approval: {approval.replace('*', '')}")
     return "\n".join(out).rstrip() + "\n", summary
 
 
