@@ -428,10 +428,12 @@ safe-outputs:
     # runs use the live head — but any push cancels them via the concurrency group first.
     # REQUEST_CHANGES stays off: a bot block that only a human can dismiss is noise.
     allowed-events: [COMMENT, APPROVE]
+  # Sized for reconciling: one run must be able to answer every waiting thread (#159 had four
+  # at once after a burst), and bot replies trigger no further run to finish the job.
   reply-to-pull-request-review-comment:
-    max: 8
+    max: 20
   resolve-pull-request-review-thread:
-    max: 8
+    max: 20
   # Answering an @-mention posted in the main PR conversation needs a conversation-level channel:
   # reply-to-* only works inside an existing review thread, and create-*-review-comment needs a
   # diff anchor. Without this the agent has no legal way to answer the most natural way a human
@@ -544,10 +546,9 @@ what you already said, and the commit history tells you what has landed since.
   comment in a draft's or a closed PR's conversation does. On either, answer what was asked and
   don't review — except that a `@github-actions review` request gets a draft reviewed (never
   approved). Section 2 of `review-state.md` applies this for you.
-- If you have already posted **6 or more** review rounds on this PR (`review-state.md` counts
-  them), post nothing further unless a human @-mentions you — a `@github-actions review` request
-  included. A reviewer that will not stop is
-  noise, and every round costs credits.
+- After **6** review rounds on a PR, post no further rounds unless someone asks with
+  `@github-actions review` — but keep answering the messages in section 1. A reviewer that will
+  not stop is noise, and every round costs credits. (`review-state.md` section 2 applies the cap.)
 
 ## Reviewing
 
@@ -590,6 +591,8 @@ Approve — submit your consolidated review with event `APPROVE` — only when *
    findings.
 4. `lint-report.md` shows no parse errors.
 5. `review-state.md` shows the PR open, not a draft, with no merge conflicts and no stale branch.
+6. The run wasn't a manual `workflow_dispatch` (`run-context.md` names the event): a dispatched
+   run isn't pinned to the commit you read, and a push doesn't cancel it.
 
 Medium and Low findings don't block: approve, and leave them as inline comments.
 
@@ -653,7 +656,10 @@ and only when they **@-mention you** (as `@github-actions`) or **reply to one of
   re-review.
 - **A claimed fix** ("done", "fixed", "updated") → verify it at the head SHA and say what you
   confirmed or what is still missing. **Pushback** → engage with the reason given. A bare
-  acknowledgement ("ok", "will update", "thanks") needs no reply.
+  acknowledgement ("ok", "will update", "thanks") needs no reply — `review-state.md` already
+  leaves those out.
+- You can post up to 20 thread replies per run. If more are waiting, answer the substantive ones
+  first; the rest stay listed for the next run.
 - If they have shown your finding is wrong, **say so and resolve the thread**. Do not defend a bad
   call — being corrected gracefully is more useful than being right. A thread the author already
   resolved still gets your answer; resolving it again is a harmless no-op.

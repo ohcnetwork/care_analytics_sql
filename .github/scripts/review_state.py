@@ -70,24 +70,34 @@ FENCE_RE = re.compile(r"^\s*`{3,}\s*(\S*)\s*$")
 MAX_BODY_CHARS = 1500
 MAX_PATCH_LINES = 200  # per file, in the delta since the last review
 MAX_DIFF_LINES = 200  # per file, in the real diff against the base
-MAX_MENTIONS = 5
+MAX_ROUNDS = 6  # review rounds per PR; past it, only `@github-actions review` gets another
 
+# Bare acknowledgements need no reply. Left in section 1 they would stay "awaiting an
+# answer" forever, since only a reply of yours settles a thread. A claimed fix ("done",
+# "fixed"), a question, an answer ("yes") or pushback is never one of these.
+ACK_WORDS = {"ok", "okay", "k", "kk", "thanks", "thank", "you", "thx", "ty", "noted", "got",
+             "it", "will", "do", "update", "fix", "this", "that", "on", "sounds", "good"}
+
+# The thread's first comment (its finding) and its latest 50: what matters is how it
+# started and what was said since you last spoke, so a long thread can't hide a reply.
+# Kept small on purpose -- GitHub costs the query by its page sizes, and bigger shapes
+# time out (HTTP 504) under load.
 THREADS_QUERY = """
+fragment C on PullRequestReviewComment {
+  databaseId createdAt body
+  author { __typename login }
+  pullRequestReview { databaseId }
+}
 query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
-      reviewThreads(first: 50, after: $cursor) {
+      reviewThreads(first: 25, after: $cursor) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id isResolved isOutdated path line originalLine
           resolvedBy { login }
-          comments(first: 100) {
-            nodes {
-              databaseId createdAt body
-              author { __typename login }
-              pullRequestReview { databaseId }
-            }
-          }
+          root: comments(first: 1) { nodes { ...C } }
+          recent: comments(last: 50) { nodes { ...C } }
         }
       }
     }
@@ -100,11 +110,19 @@ class ApiError(RuntimeError):
     pass
 
 
+def run_gh(args: list[str]) -> subprocess.CompletedProcess:
+    """`gh api ...`, retried on the 502/503/504s GitHub's API returns under load."""
+    for attempt in range(3):
+        proc = subprocess.run(["gh", "api", *args], capture_output=True, text=True,
+                              encoding="utf-8", errors="replace")
+        if proc.returncode == 0 or attempt == 2 or not re.search(r"HTTP 50[234]", proc.stderr):
+            return proc
+        time.sleep(2 + 3 * attempt)
+    return proc
+
+
 def gh(*args: str) -> str:
-    proc = subprocess.run(
-        ["gh", "api", *args],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
+    proc = run_gh(list(args))
     if proc.returncode != 0:
         raise ApiError(f"gh api {args[0]}: {proc.stderr.strip()[:300]}")
     return proc.stdout
@@ -133,10 +151,7 @@ def file_at(repo: str, path: str, ref: str) -> str | None:
         f"repos/{repo}/contents/{urllib.parse.quote(path, safe='/')}"
         f"?ref={urllib.parse.quote(ref, safe='')}"
     )
-    proc = subprocess.run(
-        ["gh", "api", url, "-H", "Accept: application/vnd.github.raw"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
+    proc = run_gh([url, "-H", "Accept: application/vnd.github.raw"])
     if proc.returncode == 0:
         return proc.stdout
     if "HTTP 404" in proc.stderr:
@@ -154,10 +169,26 @@ def review_threads(repo: str, number: int) -> list[dict]:
         if cursor:
             args += ["-f", f"cursor={cursor}"]
         conn = json.loads(gh(*args))["data"]["repository"]["pullRequest"]["reviewThreads"]
-        threads.extend(conn["nodes"])
+        threads.extend(merge_comments(t) for t in conn["nodes"])
         if not conn["pageInfo"]["hasNextPage"]:
             return threads
         cursor = conn["pageInfo"]["endCursor"]
+
+
+def merge_comments(thread: dict) -> dict:
+    """Fold the `root` and `recent` comment windows into one ordered `comments` list."""
+    root = (thread.pop("root", None) or {}).get("nodes") or []
+    recent = (thread.pop("recent", None) or {}).get("nodes") or []
+    seen = {c["databaseId"] for c in root}
+    thread["comments"] = {"nodes": root + [c for c in recent if c["databaseId"] not in seen]}
+    return thread
+
+
+def is_ack(body: str | None) -> bool:
+    """A bare acknowledgement ("ok", "thanks", "will update", 👍) that needs no reply."""
+    text = BOT_MENTION_RE.sub(" ", body or "").lower()
+    words = re.findall(r"[a-z']+", text)
+    return "?" not in text and len(words) <= 6 and all(w in ACK_WORDS for w in words)
 
 
 def fence(text: str, lang: str = "") -> str:
@@ -374,6 +405,7 @@ def build_report(repo: str, number: int, head_sha: str, since_sha: str | None) -
     issue_comments = get_list(f"repos/{repo}/issues/{number}/comments")
 
     pending = []  # (thread, its first comment, human comments awaiting you, thread is yours)
+    acks = 0
     for t in threads:
         comments = t["comments"]["nodes"]
         if not comments:
@@ -381,8 +413,10 @@ def build_report(repo: str, number: int, head_sha: str, since_sha: str | None) -
         spoke = [i for i, c in enumerate(comments) if is_mine(c)]
         since_you = comments[spoke[-1] + 1:] if spoke else comments
         yours = is_mine(comments[0])
-        waiting = [c for c in since_you if is_human(c)
-                   and (yours or BOT_MENTION_RE.search(c.get("body") or ""))]
+        addressed = [c for c in since_you if is_human(c)
+                     and (yours or BOT_MENTION_RE.search(c.get("body") or ""))]
+        waiting = [c for c in addressed if not is_ack(c.get("body"))]
+        acks += len(addressed) - len(waiting)
         if waiting:
             pending.append((t, comments[0], waiting, yours))
     # Only a conversation comment answers a conversation mention, so the watermark is your
@@ -393,9 +427,10 @@ def build_report(repo: str, number: int, head_sha: str, since_sha: str | None) -
          if (c.get("user") or {}).get("login") in BOT_LOGINS and MARKER in (c.get("body") or "")),
         default="",
     )
-    # `@github-actions review` asks for a full review of the current head. Your next
-    # consolidated review (or conversation answer) fulfils it. Only people with write access
-    # can force one: it costs credits, and anyone else can still push to get a re-review.
+    # `@github-actions review` asks for a full review of the current head. Only your next
+    # consolidated review fulfils it -- not a conversation answer to something else, which a
+    # run can post before being cancelled. Only people with write access can force one: it
+    # costs credits, and anyone else can still push to get a re-review.
     writers: dict[str, bool] = {}
 
     def can_write(login: str) -> bool:
@@ -410,8 +445,7 @@ def build_report(repo: str, number: int, head_sha: str, since_sha: str | None) -
     def is_request(body: str | None, login: str | None) -> bool:
         return bool(login and REVIEW_CMD_RE.search(body or "") and can_write(login))
 
-    reviewed_until = max((consolidated[-1].get("submitted_at") or "") if consolidated else "",
-                         answered_until)
+    reviewed_until = (consolidated[-1].get("submitted_at") or "") if consolidated else ""
     said = [(c.get("created_at") or "", (c.get("user") or {}).get("login"), c.get("body"))
             for c in issue_comments if (c.get("user") or {}).get("type") == "User"]
     said += [(c.get("createdAt") or "", (c.get("author") or {}).get("login"), c.get("body"))
@@ -420,14 +454,18 @@ def build_report(repo: str, number: int, head_sha: str, since_sha: str | None) -
                       if when > reviewed_until and is_request(body, who))
     requested_by = requests[-1] if requests else None
 
-    mentions = [
+    # All of them: one add-comment answers every listed mention and moves the watermark past
+    # them, so a mention left off this list would never be listed again.
+    mentioned = [
         c for c in issue_comments
         if (c.get("user") or {}).get("type") == "User"
         and (c.get("created_at") or "") > answered_until
         and BOT_MENTION_RE.search(c.get("body") or "")
         # a writer's review request is answered by the review itself (section 2)
         and not is_request(c.get("body"), (c.get("user") or {}).get("login"))
-    ][-MAX_MENTIONS:]
+    ]
+    mentions = [c for c in mentioned if not is_ack(c.get("body"))]
+    acks += len(mentioned) - len(mentions)
 
     out: list[str] = [
         "# Review state",
@@ -468,6 +506,9 @@ def build_report(repo: str, number: int, head_sha: str, since_sha: str | None) -
     out += ["", "## 1. Messages awaiting your answer", ""]
     if not pending and not mentions:
         out.append("None.")
+    if acks:
+        out += [f"(Left out: {acks} bare acknowledgement(s) — \"ok\", \"thanks\", \"will update\" "
+                "— which need no reply.)", ""]
     for t, root, waiting, yours in pending:
         line = t.get("line") or t.get("originalLine")
         where = f"`{t.get('path')}` line {line}" + (" (outdated)" if t.get("isOutdated") else "")
@@ -510,6 +551,10 @@ def build_report(repo: str, number: int, head_sha: str, since_sha: str | None) -
     elif pr.get("draft"):
         out.append("The PR is a draft → **no review**; only answer section 1. (Someone with write "
                    "access can ask for one with `@github-actions review`.)")
+    elif len(consolidated) >= MAX_ROUNDS:
+        out.append(f"You have posted {len(consolidated)} review rounds (the cap is {MAX_ROUNDS}) → "
+                   "**no review**; keep answering section 1. Only a `@github-actions review` "
+                   "request gets another round.")
     elif not reviewed_sha:
         out.append("No consolidated review from you yet → **first review**: review the full PR "
                    "diff (but if section 3 reports a stale branch, review the real change it shows).")
@@ -517,8 +562,19 @@ def build_report(repo: str, number: int, head_sha: str, since_sha: str | None) -
         out.append(f"No changes since your last review (`{short(reviewed_sha)}`) → "
                    "**do not re-review**.")
     else:
-        lines, delta_files = delta(repo, reviewed_sha, head_sha,
-                                   [f["filename"] for f in files], since_sha is not None)
+        paths = {f["filename"] for f in files}
+        paths |= {f["previous_filename"] for f in files if f.get("previous_filename")}
+        try:
+            # Also every file the PR touched when you reviewed it: one since reverted to match
+            # the base has dropped out of `files`, yet the change you reviewed in it is gone.
+            then = get_json(f"repos/{repo}/compare/{urllib.parse.quote(base_ref, safe='')}"
+                            f"...{reviewed_sha}").get("files") or []
+            paths |= {f["filename"] for f in then}
+            paths |= {f["previous_filename"] for f in then if f.get("previous_filename")}
+        except (ApiError, ValueError):
+            pass  # fall back to the files the PR touches now
+        lines, delta_files = delta(repo, reviewed_sha, head_sha, sorted(paths),
+                                   since_sha is not None)
         out += lines
 
     # 3. Drift against the base branch -----------------------------------------

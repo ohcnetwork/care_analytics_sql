@@ -186,17 +186,25 @@ something new.
   - `_kc` — multi-facility: facility is a Metabase parameter (`{{facility_id}}` on the
     origin facility in `patients_referred_to_secondary_unit_for_*_kc.md`). A `_kc` query
     with no facility handling is a fair question.
-- **`deleted` on a table that has a `status` column.** The skill's own inversion #1 calls
-  `deleted` low-signal — health and financial records are invalidated by status — while
-  its severity rubric lists a missing `deleted = FALSE` as Critical. Here it is **Low**: at
-  most one line in the summary, never an inline finding, and settled once the author
-  declines it (as on #158 and #159). The repo is inconsistent either way — some `_ssmm`
-  queries filter `deleted` on `emr_chargeitem` and `emr_invoice`, others don't — so don't
-  cite "repo convention" for or against it.
-- **`deleted` on a table with no `status` column** — `users_user`,
-  `emr_organizationuser`, `security_rolemodel` and the like. There `deleted` is the only
-  validity signal, so a missing `deleted = FALSE` returns wrong rows: a real finding,
-  rated by the skill's rubric (accepted on #157).
+- **`deleted` depends on whether the app can delete from the table.** CARE's delete
+  endpoints soft-delete — they set `deleted = TRUE` and leave `status` alone — and the ORM
+  then hides the row, so raw SQL has to filter it out. But only some resources have a
+  delete endpoint (checked against `care/emr/api/viewsets` on `develop`):
+  - **Deletable:** patients, users, roles, organizations and their user links
+    (`emr_organizationuser`, facility-organization users), facilities, facility locations
+    and location–encounter links (`emr_facilitylocationencounter`), devices, schedules,
+    availability and tokens, questionnaires, value sets, resource requests. A missing
+    `deleted = FALSE` on these counts rows the app hides: a real finding, rated by its
+    impact — even when the table also has a `status` (accepted on #157).
+  - **Not deletable:** charge items, invoices, accounts, encounters, service requests,
+    medication dispenses, supply deliveries and delivery orders, products and product
+    knowledge, payment reconciliations, tag configs. These are invalidated by `status`,
+    which is the filter that matters. A missing `deleted = FALSE` on them is **Low**: at
+    most one line in the summary, never an inline finding, and settled once the author
+    declines it (as on #158 and #159).
+
+  For a table in neither list, check whether its viewset includes `EMRModelViewSet` or
+  `EMRDestroyMixin` before raising it.
 - **Settled stays settled.** Once an author declines a convention-level suggestion with
   a reason, don't raise it again in a later round of the same PR.
 
