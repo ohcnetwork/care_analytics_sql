@@ -14,7 +14,9 @@ Everything here comes from the GitHub API, never from the working tree:
   1. Messages awaiting an answer: human replies in the bot's own review
      threads posted after the bot last spoke in that thread, and
      @github-actions mentions -- in other review threads, or in the PR
-     conversation since the bot last commented there.
+     conversation since the bot last commented there. An unfulfilled
+     `@github-actions review` from someone with write access instead turns
+     section 2 into a full review of the current head.
   2. What changed in the PR's files since the bot's last consolidated review,
      diffed version against version (so a force-push is caught even when it
      moves the head backwards), with every REMOVED line listed on its own.
@@ -57,6 +59,10 @@ MARKER = "workflow_id: analytics-review"
 BOT_LOGINS = {"github-actions[bot]", "github-actions"}  # REST vs GraphQL spelling
 # How a human summons the bot: it posts as github-actions[bot].
 BOT_MENTION_RE = re.compile(r"(?<![\w.`])@github-actions(?:\[bot\])?(?![\w-])", re.IGNORECASE)
+# `@github-actions review`: a full review of the current head, on request.
+REVIEW_CMD_RE = re.compile(
+    r"(?<![\w.`])@github-actions(?:\[bot\])?\s+(?:please\s+)?(?:re-?)?review\b", re.IGNORECASE)
+WRITE_PERMISSIONS = {"admin", "maintain", "write"}
 QUERY_DOC_RE = re.compile(r"^(Care|Internal).*\.md$")  # same scope as the lint step
 LAST_UPDATED_RE = re.compile(r"^\*Last updated: (\d{4}-\d{2}-\d{2})\*\s*$", re.MULTILINE)
 FENCE_RE = re.compile(r"^\s*`{3,}\s*(\S*)\s*$")
@@ -387,11 +393,40 @@ def build_report(repo: str, number: int, head_sha: str, since_sha: str | None) -
          if (c.get("user") or {}).get("login") in BOT_LOGINS and MARKER in (c.get("body") or "")),
         default="",
     )
+    # `@github-actions review` asks for a full review of the current head. Your next
+    # consolidated review (or conversation answer) fulfils it. Only people with write access
+    # can force one: it costs credits, and anyone else can still push to get a re-review.
+    writers: dict[str, bool] = {}
+
+    def can_write(login: str) -> bool:
+        if login not in writers:
+            try:
+                perm = get_json(f"repos/{repo}/collaborators/{login}/permission").get("permission")
+                writers[login] = perm in WRITE_PERMISSIONS
+            except (ApiError, ValueError):
+                writers[login] = False  # can't confirm write access: not a request
+        return writers[login]
+
+    def is_request(body: str | None, login: str | None) -> bool:
+        return bool(login and REVIEW_CMD_RE.search(body or "") and can_write(login))
+
+    reviewed_until = max((consolidated[-1].get("submitted_at") or "") if consolidated else "",
+                         answered_until)
+    said = [(c.get("created_at") or "", (c.get("user") or {}).get("login"), c.get("body"))
+            for c in issue_comments if (c.get("user") or {}).get("type") == "User"]
+    said += [(c.get("createdAt") or "", (c.get("author") or {}).get("login"), c.get("body"))
+             for t in threads for c in t["comments"]["nodes"] if is_human(c)]
+    requests = sorted((when, who) for when, who, body in said
+                      if when > reviewed_until and is_request(body, who))
+    requested_by = requests[-1] if requests else None
+
     mentions = [
         c for c in issue_comments
         if (c.get("user") or {}).get("type") == "User"
         and (c.get("created_at") or "") > answered_until
         and BOT_MENTION_RE.search(c.get("body") or "")
+        # a writer's review request is answered by the review itself (section 2)
+        and not is_request(c.get("body"), (c.get("user") or {}).get("login"))
     ][-MAX_MENTIONS:]
 
     out: list[str] = [
@@ -466,6 +501,15 @@ def build_report(repo: str, number: int, head_sha: str, since_sha: str | None) -
     delta_files = 0
     if not is_open:
         out.append(f"The PR is {state_label.strip('*')} → **no review**; only answer section 1.")
+    elif requested_by:
+        when, who = requested_by
+        out.append(f"**Full review requested** by @{who} ({when}) → review the current head in "
+                   "full, as a first review, whatever changed since your last review (but if "
+                   "section 3 reports a stale branch, review the real change it shows)."
+                   + (" It's a draft: review it, but don't approve." if pr.get("draft") else ""))
+    elif pr.get("draft"):
+        out.append("The PR is a draft → **no review**; only answer section 1. (Someone with write "
+                   "access can ask for one with `@github-actions review`.)")
     elif not reviewed_sha:
         out.append("No consolidated review from you yet → **first review**: review the full PR "
                    "diff (but if section 3 reports a stale branch, review the real change it shows).")
@@ -515,7 +559,8 @@ def build_report(repo: str, number: int, head_sha: str, since_sha: str | None) -
                f"conversation mention(s) awaiting an answer; {delta_files} file(s) changed since "
                f"the last review; {stale} stale file(s); {not_bumped} Last-updated miss(es); "
                f"conflicts: {conflict if is_open else 'n/a (' + state_label.strip('*') + ')'}; "
-               f"{open_findings} unresolved finding(s); approval: {approval.replace('*', '')}")
+               f"{open_findings} unresolved finding(s); approval: {approval.replace('*', '')}; "
+               f"review requested: {'by @' + requested_by[1] if requested_by else 'no'}")
     return "\n".join(out).rstrip() + "\n", summary
 
 

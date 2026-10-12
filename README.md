@@ -49,6 +49,8 @@ Every pull request is reviewed automatically by an agentic workflow
 
 **Talking to it:** reply to any of its inline comments, or mention `@github-actions` anywhere on the PR, and it will answer. Each run answers every reply still waiting on it, so a burst of replies is handled together. While a PR has merge conflicts, GitHub doesn't deliver review-thread replies to the bot; they're answered on the next push (or @-mention it in the conversation). It stops re-reviewing after 6 rounds per PR unless summoned with an @-mention. To silence it for a PR, mark the PR as draft.
 
+**Asking for a fresh review:** comment `@github-actions review` on the PR to get a full review of its current state, for example to have an older PR re-checked against its ticket, or approved, without pushing a change. Only people with write access can request one. It works while a PR has conflicts, and on drafts (a review, but never an approval). It counts as a review round.
+
 **Approvals:** when a PR clears its bar (ticket fetched and delivered, no open Critical/High findings, clean lint, no conflicts), the bot approves. `main` requires two approvals and drops them on every push, so the bot's approval is one of the two and a human must still review and approve. It never requests changes.
 
 **Prerequisites (admin setup):**

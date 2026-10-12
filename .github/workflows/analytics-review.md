@@ -511,9 +511,10 @@ to do from `review-state.md`, not from the event:
 1. If `run-context.md` resolves **no** PR number, there is nothing to review: `noop` with that
    reason.
 2. **Answer every message in section 1** of `review-state.md` — see *Answering humans*.
-3. **Review as section 2 says:** a *first review* of the full PR diff; a *re-review* of the delta
-   it shows, plus a re-check of your own open findings — whatever the trigger, a reply-triggered
-   run included; or no review and no summary. One exception: if section 2 says no review but your
+3. **Review as section 2 says:** a *first review* of the full PR diff — also when someone with
+   write access asked for one with `@github-actions review`; a *re-review* of the delta it shows,
+   plus a re-check of your own open findings — whatever the trigger, a reply-triggered run
+   included; or no review and no summary. One exception: if section 2 says no review but your
    answers in step 2 settle your last open Critical or High finding, post a short summary anyway —
    `APPROVE` if *Approving* allows it, otherwise `COMMENT` saying what still stands in the way.
 4. Fold section 3 (stale branch, merge conflicts, `*Last updated:*`) into whichever review you post.
@@ -540,10 +541,12 @@ what you already said, and the commit history tells you what has landed since.
   `review-state.md` shows no messages awaiting you and section 2 says no review, or the diff
   touches no query docs and no SQL (e.g. README-only) and there is nothing your lenses apply to.
 - **Drafts and closed PRs.** Pushes to a draft never reach you (filtered at the trigger), but a
-  comment in a draft's or a closed PR's conversation does. On either — `review-state.md` says
-  which — answer what was asked and don't review.
+  comment in a draft's or a closed PR's conversation does. On either, answer what was asked and
+  don't review — except that a `@github-actions review` request gets a draft reviewed (never
+  approved). Section 2 of `review-state.md` applies this for you.
 - If you have already posted **6 or more** review rounds on this PR (`review-state.md` counts
-  them), post nothing further unless a human @-mentions you. A reviewer that will not stop is
+  them), post nothing further unless a human @-mentions you — a `@github-actions review` request
+  included. A reviewer that will not stop is
   noise, and every round costs credits.
 
 ## Reviewing
@@ -576,9 +579,9 @@ what you already said, and the commit history tells you what has landed since.
 
 Approve — submit your consolidated review with event `APPROVE` — only when **all** of these hold:
 
-1. You read the head SHA in `run-context.md` during this run: a first review, a re-review of the
-   delta up to it, or the check that settled your last finding (the exception in *First:
-   reconcile*).
+1. You read the head SHA in `run-context.md` during this run: a first or requested full review,
+   a re-review of the delta up to it, or the check that settled your last finding (the exception
+   in *First: reconcile*).
 2. `jira-ticket.md` holds a real ticket, not a `NO TICKET FOUND` marker, and Lens 1 finds the
    query delivers it. You can't approve what you couldn't check against its requirement.
 3. No Critical or High finding of yours is open, from this run or an earlier round. A finding is
@@ -645,6 +648,9 @@ and only when they **@-mention you** (as `@github-actions`) or **reply to one of
   `reply-to-pull-request-review-comment` (section 1 gives the comment_id) — and if it is someone
   else's thread, never resolve it; @-mention in the main conversation → `add-comment` (you get one,
   so answer every mention in it).
+- **`@github-actions review` from someone without write access** isn't a review request, so
+  section 2 won't show one: say that a maintainer can ask for it, or that pushing a change gets a
+  re-review.
 - **A claimed fix** ("done", "fixed", "updated") → verify it at the head SHA and say what you
   confirmed or what is still missing. **Pushback** → engage with the reason given. A bare
   acknowledgement ("ok", "will update", "thanks") needs no reply.
