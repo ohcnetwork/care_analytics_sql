@@ -83,7 +83,7 @@ ORDER BY t.account_due DESC, t.account_id;
 - **Due filter:** Only accounts whose rounded `total_balance` is above `0` are shown. 
 - **Amounts:** `account_due`, `account_billed_gross`, and `account_paid` are rounded to whole numbers.
 - **SSMM ID:** Taken from `emr_patientidentifier` with `config_id = 21`; `ssmm_id` is an exact match.
-- **Field filters:** `{{encounter_status}}` and `{{encounter_date}}` must be mapped to `emr_encounter.status` and `emr_encounter.created_date` in the Metabase variable settings.
+ - **Field filters:** When enabling the commented optional clauses in Metabase, map `{{encounter_status}}` to `emr_encounter.status` and set its **Table and field alias** to `e.status`; map `{{encounter_date}}` to `emr_encounter.created_date` and set its **Table and field alias** to `e.created_date`.
 - **Ordering:** Highest due amount first, then by account id.
 
 *Last updated: 2026-10-29*
