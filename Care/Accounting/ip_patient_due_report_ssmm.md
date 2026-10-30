@@ -92,7 +92,7 @@ ORDER BY t.account_due DESC, t.account_id;
 - **Account-to-encounter links (`acc_enc`):** An account is linked to an encounter either through its paid/billed charge items (falling back to the account's primary encounter when the charge item has none) or directly through `primary_encounter_id`.
 - **Amounts:** `account_due`, `account_billed_gross`, and `account_paid` are rounded to whole numbers.
 - **SSMM ID:** Taken from `emr_patientidentifier` with `config_id = 21`; `ssmm_id` is an exact match.
-- **Field filters:** `{{encounter_status}}` and `{{encounter_date}}` must be mapped to `emr_encounter.status` and `emr_encounter.created_date` in the Metabase variable settings.
+ - **Field filters:** When enabling the optional filter clauses in Metabase, map `{{encounter_status}}` and `{{encounter_date}}` to `emr_encounter.status` and `emr_encounter.created_date`, respectively. Set their **Table and field alias** values to `e.status` and `e.created_date`.
 - **Ordering:** Highest due amount first, then by account id.
 
 *Last updated: 2026-10-29*
