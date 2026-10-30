@@ -61,7 +61,7 @@ ORDER BY ep.id, esd.created_date;
   - Patient return: `patient` is set.
 - **Value:** `supplied_item_quantity × purchase_price`, i.e. the movement valued at purchase cost.
 - **Batch:** Read from the `lot_number` key of the product's `batch` JSON.
-- **Field filters:** `{{date}}` and `{{status}}` are Metabase field filters and must be mapped to `emr_supplydelivery.created_date` and `emr_supplydelivery.status` in the variable settings.
+ - **Field filters:** When enabling the optional Metabase filters, map `{{date}}` to `emr_supplydelivery.created_date` and set its **Table and field alias** to `esd.created_date`; map `{{status}}` to `emr_supplydelivery.status` and set its **Table and field alias** to `esd.status`.
 - **Product filter:** `{{product}}` is an exact, case-sensitive match on the product name.
 - **Ordering:** Sorted by `product_id` and then `moved_at`, so each product batch reads as a timeline.
 
