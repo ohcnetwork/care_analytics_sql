@@ -49,7 +49,7 @@ movements AS (
     -- DISPENSES: debited to the item's location; consumption locations become NULL = "(no location)"
     SELECT
         ep.id,
-        CASE WHEN eii.location_id = ANY(ex.ids) THEN NULL ELSE eii.location_id END,
+        eii.location_id,
         0, 0,
         ep.purchase_price * emd.quantity, emd.quantity,
         0, 0
