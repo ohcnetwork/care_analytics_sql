@@ -46,7 +46,7 @@ movements AS (
 
     UNION ALL
 
-    -- DISPENSES: debited to the item's location; consumption locations become NULL = "(no location)"
+    -- DISPENSES: debited to the item's location
     SELECT
         ep.id,
         eii.location_id,
@@ -67,7 +67,7 @@ movements AS (
     UNION ALL
 
     -- MISTAKES IN: into a consumption location, charged to the origin
-    -- (a supplier delivery has no origin, so it nets against its purchase at the destination)
+
     SELECT
         ep.id,
         COALESCE(edo.origin_id, edo.destination_id),
