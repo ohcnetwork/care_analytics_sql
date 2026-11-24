@@ -67,6 +67,7 @@ all_beds AS (
     LEFT JOIN emr_facilitylocation grandparent_loc ON parent_loc.parent_id = grandparent_loc.id
     WHERE fl.form = 'bd'
       AND fl.root_location_id != 300
+       AND fle.status IN ('active', 'completed')
       AND fle.deleted = FALSE
     ORDER BY fle.encounter_id, fle.start_datetime DESC, fle.created_date DESC
 )
